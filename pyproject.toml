@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "julia-cookbook"
+version = "0.1.0"
+description = "A static cookbook generator and local-first cooking companion"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "julia contributors" }]
+
+[project.scripts]
+julia = "julia_cookbook.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/julia_cookbook"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+

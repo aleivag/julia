@@ -1,0 +1,83 @@
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass, field
+from typing import Any
+
+
+@dataclass(slots=True)
+class SourceLocation:
+    path: str
+    line: int
+    column: int = 1
+
+
+@dataclass(slots=True)
+class Annotation:
+    kind: str
+    name: str
+    quantity: str = ""
+    unit: str = ""
+    note: str = ""
+    attributes: dict[str, str] = field(default_factory=dict)
+    source: SourceLocation | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        value = asdict(self)
+        value.pop("source", None)
+        return value
+
+
+@dataclass(slots=True)
+class Step:
+    id: str
+    title: str
+    markdown: str
+    html: str
+    ingredients: list[Annotation] = field(default_factory=list)
+    equipment: list[Annotation] = field(default_factory=list)
+    timers: list[Annotation] = field(default_factory=list)
+    parameters: list[Annotation] = field(default_factory=list)
+    line: int = 1
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "html": self.html,
+            "ingredients": [item.to_dict() for item in self.ingredients],
+            "equipment": [item.to_dict() for item in self.equipment],
+            "timers": [item.to_dict() for item in self.timers],
+            "parameters": [item.to_dict() for item in self.parameters],
+        }
+
+
+@dataclass(slots=True)
+class Recipe:
+    id: str
+    metadata: dict[str, Any]
+    steps: list[Step]
+    path: str
+
+    @property
+    def title(self) -> str:
+        return str(self.metadata.get("title", self.id.replace("-", " ").title()))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": 1,
+            "id": self.id,
+            "metadata": self.metadata,
+            "steps": [step.to_dict() for step in self.steps],
+        }
+
+
+class RecipeSyntaxError(ValueError):
+    def __init__(self, path: str, line: int, message: str, hint: str = "") -> None:
+        self.path = path
+        self.line = line
+        self.message = message
+        self.hint = hint
+        text = f"{path}:{line}: {message}"
+        if hint:
+            text += f"\n  Hint: {hint}"
+        super().__init__(text)
