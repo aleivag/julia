@@ -38,4 +38,6 @@ class BuilderTests(TestCase):
             self.assertIn("Scale &amp; units", scaling)
             self.assertIn('"units":"international"', scaling)
             self.assertIn("A short note introducing the recipe", scaling)
+            self.assertIn('../recipes/meringue.html', scaling)
+            self.assertIn('../index.html?q=egg-whites', scaling)
             self.assertIn('data-kind="timer"', html)

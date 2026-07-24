@@ -4,6 +4,7 @@ import html
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from .models import Annotation, Recipe, RecipeSyntaxError, SourceLocation, Step
 
@@ -105,6 +106,21 @@ def _render_inline(raw: str, annotations: list[Annotation], path: str, line: int
     output: list[str] = []
     cursor = 0
     while cursor < len(raw):
+        if raw[cursor] == "[":
+            label_end = raw.find("](", cursor + 1)
+            target_end = raw.find(")", label_end + 2) if label_end >= 0 else -1
+            if label_end >= 0 and target_end >= 0:
+                label = raw[cursor + 1 : label_end]
+                target = raw[label_end + 2 : target_end].strip()
+                if target.startswith("recipe:"):
+                    href = f'../recipes/{quote(target.removeprefix("recipe:"), safe="-")}.html'
+                elif target.startswith("search:"):
+                    href = f'../index.html?q={quote(target.removeprefix("search:"))}'
+                else:
+                    href = target
+                output.append(f'<a href="{html.escape(href)}">{html.escape(label)}</a>')
+                cursor = target_end + 1
+                continue
         if raw[cursor] in "@#~$":
             annotation, end = _annotation(raw, cursor, path, line)
             ingredient_index = sum(item.kind == "ingredient" for item in annotations)
@@ -176,6 +192,7 @@ def parse_recipe(path: str | Path) -> Recipe:
     steps: list[Step] = []
     current_title = ""
     current_lines: list[tuple[int, str]] = []
+    blurb_lines: list[tuple[int, str]] = []
     marker_seen = False
 
     def finish() -> None:
@@ -195,12 +212,12 @@ def parse_recipe(path: str | Path) -> Recipe:
             continue
         if POSSIBLE_STEP_RE.match(raw.strip()):
             raise RecipeSyntaxError(str(source), index + 1, f'unknown step marker "{raw.strip()}"', 'Use "== step ==" or "== step name ==".')
-        if not marker_seen and not raw.strip():
-            continue
         if not marker_seen:
-            raise RecipeSyntaxError(str(source), index + 1, "content appears before the first step", 'Add "== step ==".')
+            blurb_lines.append((index + 1, raw))
+            continue
         current_lines.append((index + 1, raw))
     finish()
     if not steps:
         raise RecipeSyntaxError(str(source), body_start + 1, "recipe contains no steps")
-    return Recipe(slugify(source.stem), metadata, steps, str(source))
+    blurb_html = _parse_step(blurb_lines, "", "blurb", str(source)).html if any(text.strip() for _, text in blurb_lines) else ""
+    return Recipe(slugify(source.stem), metadata, steps, str(source), blurb_html)

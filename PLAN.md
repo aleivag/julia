@@ -85,11 +85,19 @@ recipe
      └── parameters[]  ($temp, etc.)              ← derived → inline, converts
 ```
 
-Recipes can include an optional, concise headnote in frontmatter. It appears
-between the title and recipe details and should usually be one or two sentences:
+Recipes can include an optional, concise headnote in frontmatter. It appears on
+the cookbook index and should usually be one sentence:
 
 ```yaml
 headnote: A bright make-ahead custard that turns leftover whites into pavlova.
+```
+
+Markdown between frontmatter and the first step is a short recipe-page blurb.
+Blurbs support internal recipe and search links without requiring output URLs:
+
+```markdown
+Use the whites in [pavlova](recipe:orange-cranberry-mint-pavlova), or browse
+[recipes using egg whites](search:egg-whites).
 ```
 
 Inline annotation grammar (Cooklang-style — see open question on adoption):

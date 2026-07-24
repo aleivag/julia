@@ -57,6 +57,7 @@ class Recipe:
     metadata: dict[str, Any]
     steps: list[Step]
     path: str
+    blurb_html: str = ""
 
     @property
     def title(self) -> str:
@@ -67,6 +68,7 @@ class Recipe:
             "schema": 1,
             "id": self.id,
             "metadata": self.metadata,
+            "blurbHtml": self.blurb_html,
             "steps": [step.to_dict() for step in self.steps],
         }
 

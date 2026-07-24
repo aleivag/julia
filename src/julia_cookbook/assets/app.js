@@ -173,6 +173,7 @@
   function setupIndex() {
     if (!payload.recipes) return;
     const search = document.querySelector("[data-search]");
+    search.value = new URLSearchParams(location.search).get("q") || "";
     const filter = () => { const query = search.value.toLowerCase(), tag = new URLSearchParams(location.search).get("tag")?.toLowerCase(); let shown = 0; document.querySelectorAll(".recipe-card").forEach(card => { const visible = (!query || card.dataset.search.includes(query)) && (!tag || card.dataset.tags.toLowerCase().split(" ").includes(tag)); card.hidden = !visible; shown += visible; }); document.querySelector("[data-empty]").hidden = !!shown; };
     search.addEventListener("input", filter); filter();
     const selected = new Set(); const updateCount = () => document.querySelector("[data-selected-count]").textContent = selected.size;
