@@ -100,6 +100,12 @@ Use the whites in [pavlova](recipe:orange-cranberry-mint-pavlova), or browse
 [recipes using egg whites](search:egg-whites).
 ```
 
+Related recipes can be grouped as named variations beneath the master recipe:
+
+```yaml
+variations: [vanilla-custard, chocolate-custard]
+```
+
 Inline annotation grammar (Cooklang-style — see open question on adoption):
 
 | Syntax                             | Meaning     | Behavior                                  |

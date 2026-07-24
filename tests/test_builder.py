@@ -40,4 +40,6 @@ class BuilderTests(TestCase):
             self.assertIn("A short note introducing the recipe", scaling)
             self.assertIn('../recipes/meringue.html', scaling)
             self.assertIn('../index.html?q=egg-whites', scaling)
+            self.assertIn('<section class="variations">', scaling)
+            self.assertIn('vanilla-custard.html', scaling)
             self.assertIn('data-kind="timer"', html)

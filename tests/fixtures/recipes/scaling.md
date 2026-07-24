@@ -2,6 +2,7 @@
 title: Scaling Fixture
 yield: 6 servings
 headnote: A short note introducing the recipe without delaying the instructions.
+variations: [vanilla-custard, chocolate-custard]
 ---
 
 Use the whites in [another recipe](recipe:meringue), or browse

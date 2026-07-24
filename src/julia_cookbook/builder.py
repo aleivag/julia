@@ -119,6 +119,16 @@ def _recipe_page(recipe: Recipe, site: dict[str, Any], sync: dict[str, Any]) -> 
         links = ", ".join(f'<a href="{escape(str(target))}.html">{escape(str(target).replace("-", " ").title())}</a>' for target in related)
         relationships.append(f"See also {links}")
     relationship_html = f'<p class="relationships">{" &middot; ".join(relationships)}</p>' if relationships else ""
+    variations = meta.get("variations", [])
+    if isinstance(variations, str):
+        variations = [variations]
+    variation_html = ""
+    if variations:
+        variation_links = "".join(
+            f'<li><a href="{escape(str(target))}.html">{escape(str(target).replace("-", " ").title())}</a></li>'
+            for target in variations
+        )
+        variation_html = f'<section class="variations"><h2>Variations</h2><ul>{variation_links}</ul></section>'
     steps = []
     all_ingredients = [item for recipe_step in recipe.steps for item in recipe_step.ingredients]
     scale_anchors = [item for item in all_ingredients if item.attributes.get("scale") == "true"]
@@ -171,7 +181,7 @@ def _recipe_page(recipe: Recipe, site: dict[str, Any], sync: dict[str, Any]) -> 
     content = f'''<header class="recipe-hero"><div><p class="eyebrow">Recipe</p><h1>{escape(recipe.title)}</h1><p class="recipe-yield">Makes <strong>{yield_text}</strong></p>{source}<div class="tag-list">{tags}</div></div>
       {relationship_html}<div class="recipe-actions"><button class="primary" data-action="start-cook">Make this recipe</button><a class="source-button" href="../sources/{recipe.id}.html">Show source</a></div></header>
       <div class="progress-wrap" hidden data-progress-wrap><div><span data-progress-text>0 of {len(recipe.steps)} steps</span><button class="text-button" data-action="finish-cook">Finish cook</button></div><progress max="{len(recipe.steps)}" value="0" data-progress></progress></div>
-      <section class="recipe-body">{blurb_html}{scale_panel}{''.join(steps)}<section class="cook-history"><p class="eyebrow">Cook log</p><h2>Past experiments</h2><div data-cook-history><p class="muted">No completed cooks on this device yet.</p></div></section></section>
+      <section class="recipe-body">{blurb_html}{scale_panel}{''.join(steps)}{variation_html}<section class="cook-history"><p class="eyebrow">Cook log</p><h2>Past experiments</h2><div data-cook-history><p class="muted">No completed cooks on this device yet.</p></div></section></section>
       <dialog id="finish-dialog" class="finish-dialog"><form method="dialog" data-finish-form><div class="dialog-head"><h2>Finish this cook</h2><button class="icon-button" value="cancel" aria-label="Close">&times;</button></div><label>Outcome<select name="outcome"><option value="worked">Worked well</option><option value="change">Would change</option><option value="failed">Did not work</option></select></label><label>Summary<textarea name="summary" placeholder="What will you remember next time?"></textarea></label><div class="button-row"><button class="primary" value="default">Save cooking event</button><button type="button" class="secondary danger" data-action="discard-cook">Discard cook</button></div></form></dialog>'''
     data = {"recipe": recipe.to_dict(), "units": unit_system, "sync": {"googleClientId": sync.get("google_client_id", "")}}
     return _shell(recipe.title, content, site, "recipe", data)
