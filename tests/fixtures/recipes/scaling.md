@@ -1,6 +1,7 @@
 ---
 title: Scaling Fixture
 yield: 6 servings
+headnote: A short note introducing the recipe without delaying the instructions.
 ---
 
 == step mix ==

@@ -85,6 +85,13 @@ recipe
      └── parameters[]  ($temp, etc.)              ← derived → inline, converts
 ```
 
+Recipes can include an optional, concise headnote in frontmatter. It appears
+between the title and recipe details and should usually be one or two sentences:
+
+```yaml
+headnote: A bright make-ahead custard that turns leftover whites into pavlova.
+```
+
 Inline annotation grammar (Cooklang-style — see open question on adoption):
 
 | Syntax                             | Meaning     | Behavior                                  |

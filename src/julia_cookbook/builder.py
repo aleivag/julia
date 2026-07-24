@@ -99,6 +99,8 @@ def _shell(title: str, content: str, site: dict[str, Any], page: str, data: dict
 
 def _recipe_page(recipe: Recipe, site: dict[str, Any], sync: dict[str, Any]) -> str:
     meta = recipe.metadata
+    headnote = str(meta.get("headnote") or meta.get("description") or "").strip()
+    headnote_html = f'<p class="recipe-headnote">{escape(headnote)}</p>' if headnote else ""
     unit_system = str(meta.get("units", site.get("unit_system", "international"))).lower()
     if unit_system not in {"international", "imperial"}:
         unit_system = "international"
@@ -167,7 +169,7 @@ def _recipe_page(recipe: Recipe, site: dict[str, Any], sync: dict[str, Any]) -> 
         anchor_controls.append(f'''<label class="anchor-control"><span>{escape(control["label"])}</span><span><input type="number" min="0.01" step="{escape(control["step"])}" value="{anchor_value}" data-scale-anchor data-anchor-original="{anchor_value}" data-anchor-label="{escape(control["label"])}" data-anchor-unit="{escape(control["unit"])}"> {escape(control["unit"])}</span></label>''')
     anchor_control = "".join(anchor_controls)
     scale_panel = f'''<details class="scale-panel"><summary><span>Scale &amp; units</span><strong data-scale-summary>Original</strong></summary><div class="scale-panel-body">{anchor_control}<label class="quick-scale"><span>Quick scale</span><select data-scale><option value="0.5">Half</option><option value="1" selected>Original</option><option value="1.5">1.5x</option><option value="2">Double</option><option value="3">Triple</option><option value="custom" hidden>Custom</option></select></label><fieldset class="unit-system"><legend>Temperature</legend><div role="group" aria-label="Temperature units"><button type="button" data-unit-system="international">International</button><button type="button" data-unit-system="imperial">Imperial</button></div></fieldset></div></details>'''
-    content = f'''<header class="recipe-hero"><div><p class="eyebrow">Recipe</p><h1>{escape(recipe.title)}</h1><p class="recipe-yield">Makes <strong>{yield_text}</strong></p>{source}<div class="tag-list">{tags}</div></div>
+    content = f'''<header class="recipe-hero"><div><p class="eyebrow">Recipe</p><h1>{escape(recipe.title)}</h1>{headnote_html}<p class="recipe-yield">Makes <strong>{yield_text}</strong></p>{source}<div class="tag-list">{tags}</div></div>
       {relationship_html}<div class="recipe-actions"><button class="primary" data-action="start-cook">Make this recipe</button><a class="source-button" href="../sources/{recipe.id}.html">Show source</a></div></header>
       <div class="progress-wrap" hidden data-progress-wrap><div><span data-progress-text>0 of {len(recipe.steps)} steps</span><button class="text-button" data-action="finish-cook">Finish cook</button></div><progress max="{len(recipe.steps)}" value="0" data-progress></progress></div>
       <section class="recipe-body">{scale_panel}{''.join(steps)}<section class="cook-history"><p class="eyebrow">Cook log</p><h2>Past experiments</h2><div data-cook-history><p class="muted">No completed cooks on this device yet.</p></div></section></section>
