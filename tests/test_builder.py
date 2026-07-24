@@ -29,6 +29,8 @@ class BuilderTests(TestCase):
             self.assertIn('data-anchor-original="2"', html)
             self.assertIn("By Cook", html)
             self.assertIn("https://www.instagram.com/cook/", html)
+            self.assertIn('aria-label="Instagram"', html)
+            self.assertIn('href="https://github.com/aleivag/julia"', html)
             scaling = (output / "recipes" / "scaling.html").read_text(encoding="utf-8")
             self.assertIn('data-anchor-original="5"', scaling)
             self.assertIn('data-anchor-original="6"', scaling)

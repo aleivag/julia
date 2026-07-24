@@ -57,7 +57,8 @@ def _shell(title: str, content: str, site: dict[str, Any], page: str, data: dict
     if author.get("instagram"):
         instagram = str(author["instagram"]).strip()
         instagram_url = instagram if instagram.startswith(("http://", "https://")) else f'https://www.instagram.com/{instagram.lstrip("@")}/'
-        author_links.append(f'<a href="{escape(instagram_url)}" rel="me">Instagram</a>')
+        instagram_icon = '<svg class="social-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="17.4" cy="6.6" r="1.1" fill="currentColor"/></svg>'
+        author_links.append(f'<a href="{escape(instagram_url)}" rel="me" aria-label="Instagram">{instagram_icon}<span>Instagram</span></a>')
     author_text = f'<span class="cookbook-author">By {escape(author_name)}</span>' if author_name else ""
     author_socials = f'<span class="author-links">{"".join(author_links)}</span>' if author_links else ""
     payload = json.dumps(data or {}, separators=(",", ":"), ensure_ascii=True).replace("</", "<\\/")
@@ -88,7 +89,7 @@ def _shell(title: str, content: str, site: dict[str, Any], page: str, data: dict
     <div class="button-row"><button data-action="export-data">Export</button><label class="button secondary">Import<input type="file" accept="application/json" data-action="import-data" hidden></label></div>
     <section class="sync-panel" data-sync-panel><h3>Google Drive</h3><p data-sync-status class="muted">Drive sync is not configured for this site.</p><div class="button-row"><button data-action="google-connect" hidden>Connect</button><button data-action="google-sync" hidden>Sync now</button></div></section>
   </dialog>
-  <footer class="site-footer"><div>{author_text}{author_socials}</div><div>Built with <span>julia</span></div></footer>
+  <footer class="site-footer"><div>{author_text}{author_socials}</div><div>Built with <a class="julia-link" href="https://github.com/aleivag/julia">julia</a></div></footer>
   <div id="toast" role="status" aria-live="polite"></div>
   <script id="julia-data" type="application/json">{payload}</script>
   <script src="{('../' if page == 'recipe' else '')}assets/app.js?v={asset_version}" defer></script>
