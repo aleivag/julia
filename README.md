@@ -24,3 +24,17 @@ email = "you@example.com"
 website = "https://example.com"
 instagram = "@yourhandle"
 ```
+
+## Feasts
+
+Feasts are TOML files in `feasts/` containing an ordered menu. A dish can refer
+to a recipe slug or remain menu-only until its recipe is authored.
+
+```bash
+julia feast build .
+julia feast serve .
+```
+
+Each feast generates an overview, printable menu, kitchen booklet, and shopping
+list. Guest names, allergies, and private addresses belong in a private feast
+repository, not a public cookbook.

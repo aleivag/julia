@@ -10,6 +10,7 @@ from typing import Any
 
 from .models import Annotation, Recipe
 from .parser import parse_recipe
+from .feasts import build_feasts
 
 PACKAGE_DIR = Path(__file__).parent
 
@@ -194,7 +195,7 @@ def _source_page(recipe: Recipe, site: dict[str, Any], sync: dict[str, Any]) -> 
     return _shell(f"Source: {recipe.title}", content, site, "recipe", data)
 
 
-def _index_page(recipes: list[Recipe], site: dict[str, Any], sync: dict[str, Any]) -> str:
+def _index_page(recipes: list[Recipe], site: dict[str, Any], sync: dict[str, Any], feasts: list[Any] | None = None) -> str:
     cards = []
     for recipe in recipes:
         tags = " ".join(str(tag) for tag in recipe.metadata.get("tags", []))
@@ -204,8 +205,10 @@ def _index_page(recipes: list[Recipe], site: dict[str, Any], sync: dict[str, Any
           <label class="select-recipe"><input type="checkbox" data-meal-recipe="{recipe.id}" aria-label="Add {escape(recipe.title)} to shopping list"></label>
           <a href="recipes/{recipe.id}.html"><p class="eyebrow">{len(recipe.steps)} steps &middot; {ingredient_count} ingredients</p><h2>{escape(recipe.title)}</h2><p>{escape(headnote)}</p><div class="tag-list">{''.join(f'<span>{escape(str(tag))}</span>' for tag in recipe.metadata.get('tags', []))}</div></a>
         </article>''')
+    feast_items = "".join(f'<li><a href="feasts/{escape(feast.id)}/index.html"><span>{escape(feast.title)}</span><small>{len(feast.dishes)} dishes</small></a></li>' for feast in (feasts or []))
+    feast_section = f'<section class="feast-index"><p class="eyebrow">Feasts</p><h2>Gatherings and menus</h2><ul>{feast_items}</ul></section>' if feast_items else ""
     content = f'''<section class="library-head"><div><p class="eyebrow">The working collection</p><h1>{escape(str(site.get('title', 'My Cookbook')))}</h1><p>{escape(str(site.get('description', 'Recipes tested, adjusted, and kept.')))}</p></div><div class="library-tools"><label class="search"><span class="sr-only">Search recipes</span><input type="search" data-search placeholder="Search recipes"></label><button data-action="open-shopping">Shopping list <span data-selected-count>0</span></button></div></section>
-      <section class="recipe-grid" aria-label="Recipes">{''.join(cards)}</section><p class="empty-state" hidden data-empty>No recipes match your search.</p>
+      {feast_section}<section class="recipe-grid" aria-label="Recipes">{''.join(cards)}</section><p class="empty-state" hidden data-empty>No recipes match your search.</p>
       <dialog id="shopping-dialog" class="shopping-dialog"><form method="dialog" class="dialog-head"><h2>Shopping list</h2><button class="icon-button" aria-label="Close">&times;</button></form><div class="shopping-tabs"><button class="active" data-shopping-view="merged">Merged</button><button data-shopping-view="component">By recipe</button></div><div data-shopping-list></div><div class="button-row"><button data-action="copy-shopping">Copy list</button><button class="secondary" data-action="clear-shopping">Clear</button></div></dialog>'''
     data = {"recipes": [recipe.to_dict() for recipe in recipes], "sync": {"googleClientId": sync.get("google_client_id", "")}}
     return _shell(str(site.get("title", "My Cookbook")), content, site, "index", data)
@@ -234,7 +237,8 @@ def build(root: str | Path = ".") -> tuple[Path, list[Recipe]]:
     for recipe in recipes:
         (output / "recipes" / f"{recipe.id}.html").write_text(_recipe_page(recipe, site, sync), encoding="utf-8")
         (output / "sources" / f"{recipe.id}.html").write_text(_source_page(recipe, site, sync), encoding="utf-8")
-    (output / "index.html").write_text(_index_page(recipes, site, sync), encoding="utf-8")
+    feasts = build_feasts(root_path, output, recipes)
+    (output / "index.html").write_text(_index_page(recipes, site, sync, feasts), encoding="utf-8")
     for asset in ("styles.css", "app.js", "icon.svg"):
         shutil.copyfile(PACKAGE_DIR / "assets" / asset, output / "assets" / asset)
     shutil.copyfile(PACKAGE_DIR / "assets" / "sw.js", output / "sw.js")

@@ -32,6 +32,13 @@ def _parser() -> argparse.ArgumentParser:
     ingest = commands.add_parser("import-events", help="Import exported cook events into the project")
     ingest.add_argument("export", help="JSON file exported by the web app")
     ingest.add_argument("path", nargs="?", default=".")
+    feast = commands.add_parser("feast", help="Build or serve feast documents")
+    feast_commands = feast.add_subparsers(dest="feast_command", required=True)
+    feast_build = feast_commands.add_parser("build", help="Build cookbook and feast documents")
+    feast_build.add_argument("path", nargs="?", default=".")
+    feast_serve = feast_commands.add_parser("serve", help="Build and serve feast documents")
+    feast_serve.add_argument("path", nargs="?", default=".")
+    feast_serve.add_argument("--port", type=int, default=8000)
     return parser
 
 
@@ -56,6 +63,8 @@ def main(argv: list[str] | None = None) -> int:
         destination.write_text(json.dumps(existing, indent=2) + "\n", encoding="utf-8")
         print(f"Imported {len(data['events'])} events; {len(existing['events'])} total in {destination}")
         return 0
+    if args.command == "feast":
+        args.command = "serve" if args.feast_command == "serve" else "build"
     try:
         output, recipes = build(args.path)
     except (RecipeSyntaxError, FileNotFoundError) as error:

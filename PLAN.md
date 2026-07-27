@@ -380,3 +380,19 @@ it is not required to build, browse, or cook.
    highlighting, live preview, parser diagnostics, and explicit save/export.
    Static hosted sites remain read-only unless connected to a writable provider;
    the local tool can write validated edits directly to recipe files.
+
+### Deferred design: step-level variations
+
+Small variations should not require duplicate recipe files. A future syntax will
+attach additions, quantity overrides, omissions, and replacement instructions to
+one step. Selecting a variation should update that step, scaling, shopping lists,
+and the cooking event while leaving the base recipe intact. The exact authoring
+syntax and conflict rules remain open.
+
+### Feasts
+
+Feasts are first-class TOML documents in `feasts/`. They describe ordered menu
+courses and can reference existing recipes or menu-only dishes. A build emits a
+feast overview, printable guest menu, scaled kitchen booklet, and shopping list.
+Private guest, allergy, and address data should live in a separate private feast
+repository even when recipes are public.
