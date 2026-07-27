@@ -8,6 +8,13 @@ python3 -m julia_cookbook build .
 python3 -m julia_cookbook serve .
 ```
 
+During authoring, watch the cookbook and reload open browser pages automatically:
+
+```bash
+julia serve . --watch
+julia feast serve . --watch
+```
+
 Projects contain a `.julia` TOML configuration file and a `recipes/` directory.
 See `PLAN.md` for the recipe language and product design.
 
