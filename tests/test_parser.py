@@ -64,3 +64,17 @@ Mix @flour{500%g}[base=true] and @water{65%bakers}[ratio_of=flour].
             self.assertEqual(ingredients[0].attributes["base"], "true")
             self.assertEqual(ingredients[1].unit, "bakers")
             self.assertEqual(ingredients[1].attributes["ratio_of"], "flour")
+
+    def test_parses_subrecipe_reference(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "ceviche.md"
+            path.write_text("""---
+title: Ceviche
+---
+== step assemble ==
+Mix @recipe{leche-de-tigre}{2%cups} with @salmon{1%lb}.
+""", encoding="utf-8")
+            step = parse_recipe(path).steps[0]
+            self.assertEqual(step.subrecipes[0].name, "leche-de-tigre")
+            self.assertEqual(step.subrecipes[0].quantity, "2")
+            self.assertIn("../recipes/leche-de-tigre.html", step.html)

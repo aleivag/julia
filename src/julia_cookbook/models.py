@@ -37,6 +37,7 @@ class Step:
     equipment: list[Annotation] = field(default_factory=list)
     timers: list[Annotation] = field(default_factory=list)
     parameters: list[Annotation] = field(default_factory=list)
+    subrecipes: list[Annotation] = field(default_factory=list)
     line: int = 1
 
     def to_dict(self) -> dict[str, Any]:
@@ -48,6 +49,7 @@ class Step:
             "equipment": [item.to_dict() for item in self.equipment],
             "timers": [item.to_dict() for item in self.timers],
             "parameters": [item.to_dict() for item in self.parameters],
+            "subrecipes": [item.to_dict() for item in self.subrecipes],
         }
 
 

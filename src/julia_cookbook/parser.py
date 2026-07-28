@@ -77,6 +77,26 @@ def _annotation(text: str, start: int, path: str, line: int) -> tuple[Annotation
         raise RecipeSyntaxError(path, line, f"{kind} marker has no quantity block", "Add {...}, even when it is empty.")
     name = text[cursor:brace].strip()
     body, cursor = _balanced(text, brace, "{", "}", path, line)
+    if marker == "@" and name == "recipe":
+        slug = body.strip()
+        if not slug:
+            raise RecipeSyntaxError(path, line, "recipe reference is missing its slug")
+        if cursor >= len(text) or text[cursor] != "{":
+            raise RecipeSyntaxError(path, line, "recipe reference has no quantity block", "Use @recipe{slug}{qty%unit}.")
+        amount, cursor = _balanced(text, cursor, "{", "}", path, line)
+        quantity, separator, unit = amount.partition("%")
+        note = ""
+        attrs: dict[str, str] = {}
+        if cursor < len(text) and text[cursor] == "(":
+            note, cursor = _balanced(text, cursor, "(", ")", path, line)
+        if cursor < len(text) and text[cursor] == "[":
+            raw_attrs, cursor = _balanced(text, cursor, "[", "]", path, line)
+            attrs = _attributes(raw_attrs)
+        return Annotation(
+            kind="subrecipe", name=slug, quantity=quantity.strip(),
+            unit=unit.strip() if separator else "", note=note.strip(), attributes=attrs,
+            source=SourceLocation(path, line, start + 1),
+        ), cursor
     if marker == "@" and not name:
         raise RecipeSyntaxError(path, line, "ingredient name is empty")
     if body.count("%") > 1:
@@ -135,13 +155,17 @@ def _render_inline(raw: str, annotations: list[Annotation], path: str, line: int
                 label = " ".join(part for part in (annotation.quantity, annotation.unit) if part)
             elif annotation.kind == "parameter":
                 label = f"{annotation.quantity}\u00b0{annotation.unit}" if annotation.name == "temp" else " ".join((annotation.quantity, annotation.unit))
+            elif annotation.kind == "subrecipe":
+                title = annotation.name.replace("-", " ").title()
+                measure = " ".join(part for part in (annotation.quantity, annotation.unit) if part)
+                label = f'{f"<span class=\"inline-measure\" data-quantity=\"{html.escape(annotation.quantity)}\" data-unit=\"{html.escape(annotation.unit)}\">{html.escape(measure)}</span> " if measure else ""}<a href="../recipes/{quote(annotation.name, safe="-")}.html">{html.escape(title)}</a>'
             classes = f"annotation {annotation.kind}"
             attrs = [f'class="{classes}"', f'data-kind="{annotation.kind}"']
             attrs.extend((f'data-name="{html.escape(annotation.name)}"', f'data-quantity="{html.escape(annotation.quantity)}"', f'data-unit="{html.escape(annotation.unit)}"'))
             if annotation.kind == "ingredient":
                 attrs.append(f'data-ingredient-index="{ingredient_index}"')
                 attrs.extend(('role="checkbox"', 'aria-checked="false"', 'tabindex="0"', 'title="Mark ingredient used"'))
-            rendered_label = ingredient_label if annotation.kind == "ingredient" else html.escape(label)
+            rendered_label = ingredient_label if annotation.kind == "ingredient" else label if annotation.kind == "subrecipe" else html.escape(label)
             output.append(f"<span {' '.join(attrs)}>{rendered_label}</span>")
             cursor = end
             continue
@@ -180,6 +204,7 @@ def _parse_step(raw_lines: list[tuple[int, str]], title: str, step_id: str, path
         equipment=[a for a in annotations if a.kind == "equipment"],
         timers=[a for a in annotations if a.kind == "timer"],
         parameters=[a for a in annotations if a.kind == "parameter"],
+        subrecipes=[a for a in annotations if a.kind == "subrecipe"],
         line=raw_lines[0][0] if raw_lines else 1,
     )
 

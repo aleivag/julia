@@ -121,6 +121,34 @@ def _scaled_step_html(step_html: str, scale: float) -> str:
     return pattern.sub(lambda match: f'{match.group(1)}{escape(_scaled_quantity(match.group(2), scale))}{match.group(4)}', step_html)
 
 
+def _yield_amount(recipe: Recipe) -> float | None:
+    match = re.match(r"\s*(\d+(?:\.\d+)?(?:\s+\d+/\d+|/\d+)?)", str(recipe.metadata.get("yield", "")))
+    return _amount(match.group(1)) if match else None
+
+
+def _dependency_scale(reference: Any, parent_scale: float, dependency: Recipe) -> float:
+    requested = _amount(reference.quantity)
+    produced = _yield_amount(dependency)
+    if requested is not None and produced:
+        return requested * parent_scale / produced
+    return parent_scale
+
+
+def _walk_recipe(recipe: Recipe, scale: float, recipes: dict[str, Recipe], trail: tuple[str, ...] = ()) -> list[tuple[Recipe, float]]:
+    if recipe.id in trail:
+        chain = " -> ".join((*trail, recipe.id))
+        raise ValueError(f"circular recipe dependency: {chain}")
+    result: list[tuple[Recipe, float]] = []
+    for step in recipe.steps:
+        for reference in step.subrecipes:
+            dependency = recipes.get(reference.name)
+            if not dependency:
+                raise ValueError(f"{recipe.path}: unknown subrecipe '{reference.name}'")
+            result.extend(_walk_recipe(dependency, _dependency_scale(reference, scale, dependency), recipes, (*trail, recipe.id)))
+    result.append((recipe, scale))
+    return result
+
+
 def render_menu(feast: Feast, recipes: dict[str, Recipe], stylesheet: str = "../../assets/styles.css") -> str:
     courses = []
     for course, dishes in _grouped_dishes(feast):
@@ -152,10 +180,10 @@ def render_shopping(feast: Feast, recipes: dict[str, Recipe]) -> str:
         recipe = recipes.get(dish.recipe)
         if not recipe:
             continue
-        scale = _recipe_scale(feast, dish, recipe)
-        for step in recipe.steps:
-            for ingredient in step.ingredients:
-                rows.append((ingredient.name, _scaled_quantity(ingredient.quantity, scale), ingredient.unit, recipe.title))
+        for expanded, scale in _walk_recipe(recipe, _recipe_scale(feast, dish, recipe), recipes):
+            for step in expanded.steps:
+                for ingredient in step.ingredients:
+                    rows.append((ingredient.name, _scaled_quantity(ingredient.quantity, scale), ingredient.unit, expanded.title))
     merged: dict[tuple[str, str], tuple[str, str, float, set[str]]] = {}
     loose: list[tuple[str, str, str, str]] = []
     for name, quantity, unit, recipe in rows:
@@ -179,13 +207,17 @@ def render_shopping(feast: Feast, recipes: dict[str, Recipe]) -> str:
 
 def render_booklet(feast: Feast, recipes: dict[str, Recipe]) -> str:
     sections = []
+    included: set[str] = set()
     for dish in feast.dishes:
         recipe = recipes.get(dish.recipe)
         if not recipe:
             continue
-        scale = _recipe_scale(feast, dish, recipe)
-        steps = "".join(f'<section class="booklet-step"><aside>{"".join(f"<div>{escape(_scaled_quantity(i.quantity, scale))} {escape(i.unit)} {escape(i.name)}</div>" for i in step.ingredients)}</aside><div><h3>{escape(step.title)}</h3>{_scaled_step_html(step.html, scale)}</div></section>' for step in recipe.steps)
-        sections.append(f'<article class="booklet-recipe"><h2>{escape(recipe.title)}</h2>{steps}</article>')
+        for expanded, scale in _walk_recipe(recipe, _recipe_scale(feast, dish, recipe), recipes):
+            if expanded.id in included:
+                continue
+            included.add(expanded.id)
+            steps = "".join(f'<section class="booklet-step"><aside>{"".join(f"<div>{escape(_scaled_quantity(i.quantity, scale))} {escape(i.unit)} {escape(i.name)}</div>" for i in step.ingredients)}{"".join(f"<div class=\"booklet-dependency\">{escape(_scaled_quantity(r.quantity, scale))} {escape(r.unit)} {escape(r.name.replace("-", " ").title())}</div>" for r in step.subrecipes)}</aside><div><h3>{escape(step.title)}</h3>{_scaled_step_html(step.html, scale).replace("../recipes/", "../../recipes/")}</div></section>' for step in expanded.steps)
+            sections.append(f'<article class="booklet-recipe"><h2>{escape(expanded.title)}</h2>{steps}</article>')
     return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{escape(feast.title)} · Kitchen Booklet</title><link rel="stylesheet" href="../../assets/styles.css"></head><body class="feast-page"><main class="feast-document"><a href="index.html">Back to feast</a><h1>{escape(feast.title)}</h1><p>Kitchen booklet</p>{''.join(sections)}</main></body></html>'''
 
 

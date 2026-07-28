@@ -166,10 +166,14 @@ def _recipe_page(recipe: Recipe, site: dict[str, Any], sync: dict[str, Any]) -> 
                 measure_attrs += f' data-ratio="{escape(item.quantity)}" data-base-quantity="{escape(item_ratio_base.quantity)}" data-base-unit="{escape(item_ratio_base.unit)}"'
             ingredient_rows.append(f'''<li><label><input type="checkbox" data-check="ingredient" data-key="{step.id}:{i}" data-ingredient-index="{i}"><span class="measure" {measure_attrs}>{escape(display)}</span> <span>{escape(item.name)}</span>{f'<small>{escape(item.note)}</small>' if item.note else ''}</label><label class="actual-used">Used <input type="number" min="0" step="any" inputmode="decimal" data-actual="{step.id}:{i}" data-ingredient-name="{escape(item.name)}"{ratio_attrs}> <span>{escape(actual_unit)}</span></label><p class="ratio-warning" data-ratio-warning="{step.id}:{i}"></p></li>''')
         ingredients = "".join(ingredient_rows)
+        subrecipes = "".join(
+            f'''<li class="subrecipe-row"><a href="{escape(item.name)}.html"><span class="measure" data-quantity="{escape(item.quantity)}" data-unit="{escape(item.unit)}">{escape(_quantity(item))}</span><span>{escape(item.name.replace("-", " ").title())}</span><small>Subrecipe</small></a></li>'''
+            for item in step.subrecipes
+        )
         equipment = "".join(f'<span class="equipment-chip">{escape(item.name)}</span>' for item in step.equipment)
         heading = f'<p class="component">{escape(step.title)}</p>' if step.title else ""
         steps.append(f'''<article class="recipe-step" id="{step.id}" data-step="{step.id}">
-          <aside>{heading}<ul class="ingredient-list">{ingredients or '<li class="muted">No ingredients</li>'}</ul>{equipment}</aside>
+          <aside>{heading}<ul class="ingredient-list">{ingredients}{subrecipes}{'<li class="muted">No ingredients</li>' if not ingredients and not subrecipes else ''}</ul>{equipment}</aside>
           <section class="instructions"><div class="step-heading"><span class="step-number">{index + 1}</span><label><input type="checkbox" data-check="step" data-key="{step.id}"><span>Step complete</span></label></div>{step.html}<textarea data-step-note="{step.id}" placeholder="Note from this cook" aria-label="Notes for step {index + 1}"></textarea></section>
         </article>''')
     yield_text = escape(str(meta.get("yield", "Not specified")))
@@ -199,9 +203,10 @@ def _index_page(recipes: list[Recipe], site: dict[str, Any], sync: dict[str, Any
     cards = []
     for recipe in recipes:
         tags = " ".join(str(tag) for tag in recipe.metadata.get("tags", []))
+        family = str(recipe.metadata.get("family", ""))
         ingredient_count = sum(len(step.ingredients) for step in recipe.steps)
         headnote = str(recipe.metadata.get("headnote") or recipe.metadata.get("description") or recipe.metadata.get("yield", "Flexible yield"))
-        cards.append(f'''<article class="recipe-card" data-search="{escape((recipe.title + ' ' + tags).lower())}" data-tags="{escape(tags)}">
+        cards.append(f'''<article class="recipe-card" data-search="{escape((recipe.title + ' ' + tags + ' ' + family).lower())}" data-tags="{escape(tags + ' ' + family)}">
           <label class="select-recipe"><input type="checkbox" data-meal-recipe="{recipe.id}" aria-label="Add {escape(recipe.title)} to shopping list"></label>
           <a href="recipes/{recipe.id}.html"><p class="eyebrow">{len(recipe.steps)} steps &middot; {ingredient_count} ingredients</p><h2>{escape(recipe.title)}</h2><p>{escape(headnote)}</p><div class="tag-list">{''.join(f'<span>{escape(str(tag))}</span>' for tag in recipe.metadata.get('tags', []))}</div></a>
         </article>''')
@@ -226,6 +231,12 @@ def build(root: str | Path = ".") -> tuple[Path, list[Recipe]]:
     if not recipe_dir.is_dir():
         raise FileNotFoundError(f"Recipe directory not found: {recipe_dir}")
     recipes = sorted((parse_recipe(path) for path in recipe_dir.glob("*.md")), key=lambda item: item.title.lower())
+    recipe_ids = {recipe.id for recipe in recipes}
+    for recipe in recipes:
+        for step in recipe.steps:
+            for reference in step.subrecipes:
+                if reference.name not in recipe_ids:
+                    raise ValueError(f"{recipe.path}:{step.line}: unknown subrecipe '{reference.name}'")
     output = root_path / str(site.get("output", "build"))
     (output / "recipes").mkdir(parents=True, exist_ok=True)
     (output / "sources").mkdir(parents=True, exist_ok=True)

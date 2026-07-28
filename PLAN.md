@@ -106,6 +106,18 @@ Related recipes can be grouped as named variations beneath the master recipe:
 variations: [vanilla-custard, chocolate-custard]
 ```
 
+Reusable preparations are recipe dependencies, not ordinary ingredients. A
+recipe reference links to its source recipe, scales the requested yield, expands
+its raw ingredients into feast shopping lists, and includes its instructions in
+the kitchen booklet:
+
+```markdown
+Prepare @recipe{artichoke-leche-de-tigre}{2%cups} and keep it cold.
+```
+
+The referenced recipe remains independently searchable and can use metadata such
+as `family: leche-de-tigre` to group peer preparations.
+
 Inline annotation grammar (Cooklang-style — see open question on adoption):
 
 | Syntax                             | Meaning     | Behavior                                  |

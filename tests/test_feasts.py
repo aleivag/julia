@@ -24,6 +24,10 @@ recipe = "scaling"
 servings = 8
 
 [[dishes]]
+course = "Main"
+recipe = "ceviche"
+
+[[dishes]]
 course = "Dessert"
 name = "Ice Cream"
 description = "A frozen finish."
@@ -35,5 +39,7 @@ description = "A frozen finish."
             self.assertIn("Scaling Fixture", (target / "menu.html").read_text())
             shopping = (target / "shopping.html").read_text()
             self.assertIn("6 2/3  egg yolks", shopping)
+            self.assertIn("4 cups lime juice", shopping)
             self.assertIn("Recipes still needed", shopping)
             self.assertIn(">6 2/3</span> egg yolks", (target / "booklet.html").read_text())
+            self.assertIn("Leche de Tigre", (target / "booklet.html").read_text())

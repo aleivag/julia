@@ -171,7 +171,7 @@ def main(argv: list[str] | None = None) -> int:
         args.command = "serve" if args.feast_command == "serve" else "build"
     try:
         output, recipes = build(args.path)
-    except (RecipeSyntaxError, FileNotFoundError) as error:
+    except (RecipeSyntaxError, FileNotFoundError, ValueError) as error:
         print(f"error: {error}")
         return 2
     print(f"Built {len(recipes)} recipes in {output}")
