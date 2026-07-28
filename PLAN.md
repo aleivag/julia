@@ -408,3 +408,8 @@ courses and can reference existing recipes or menu-only dishes. A build emits a
 feast overview, printable guest menu, scaled kitchen booklet, and shopping list.
 Private guest, allergy, and address data should live in a separate private feast
 repository even when recipes are public.
+
+Feast dishes may customize guest-facing presentation while retaining their
+recipe relationship: `name` overrides the recipe title, `headnote` overrides
+the recipe headnote, and `note` appends feast-specific context. This affects the
+menu and feast overview, not the source recipe or kitchen instructions.

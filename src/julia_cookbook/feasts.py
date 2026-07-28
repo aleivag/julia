@@ -17,6 +17,8 @@ class FeastDish:
     name: str = ""
     recipe: str = ""
     description: str = ""
+    headnote: str = ""
+    note: str = ""
     servings: float | None = None
 
 
@@ -63,10 +65,10 @@ def _dish_name(dish: FeastDish, recipes: dict[str, Recipe]) -> str:
 
 
 def _dish_description(dish: FeastDish, recipes: dict[str, Recipe]) -> str:
-    if dish.description:
-        return dish.description
+    override = dish.headnote or dish.description
     recipe = recipes.get(dish.recipe)
-    return str(recipe.metadata.get("headnote", "")) if recipe else ""
+    base = override or (str(recipe.metadata.get("headnote", "")) if recipe else "")
+    return " ".join(part for part in (base, dish.note) if part)
 
 
 def _grouped_dishes(feast: Feast) -> list[tuple[str, list[FeastDish]]]:

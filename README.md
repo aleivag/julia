@@ -45,3 +45,18 @@ julia feast serve .
 Each feast generates an overview, printable menu, kitchen booklet, and shopping
 list. Guest names, allergies, and private addresses belong in a private feast
 repository, not a public cookbook.
+
+Dish presentation can be customized without changing the underlying recipe:
+
+```toml
+[[dishes]]
+course = "Dessert"
+recipe = "sous-vide-creme-brulee"
+name = "Vanilla Custard, Burnt Sugar"
+headnote = "A feast-specific description that replaces the recipe headnote."
+note = "Served with late-summer berries."
+```
+
+`name` overrides the recipe title, `headnote` overrides its index headnote, and
+`note` is appended. The older `description` field remains an alias for
+`headnote`.

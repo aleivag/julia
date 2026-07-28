@@ -22,6 +22,9 @@ serves = 8
 course = "Main"
 recipe = "scaling"
 servings = 8
+name = "Custard for Eight"
+headnote = "A feast-specific description."
+note = "Served with berries."
 
 [[dishes]]
 course = "Main"
@@ -36,7 +39,10 @@ description = "A frozen finish."
             target = output / "feasts" / "supper"
             for name in ("index.html", "menu.html", "shopping.html", "booklet.html"):
                 self.assertTrue((target / name).exists())
-            self.assertIn("Scaling Fixture", (target / "menu.html").read_text())
+            menu = (target / "menu.html").read_text()
+            self.assertIn("Custard for Eight", menu)
+            self.assertIn("A feast-specific description. Served with berries.", menu)
+            self.assertIn("Ceviche", menu)
             shopping = (target / "shopping.html").read_text()
             self.assertIn("6 2/3  egg yolks", shopping)
             self.assertIn("4 cups lime juice", shopping)
