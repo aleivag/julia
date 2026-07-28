@@ -45,6 +45,10 @@ class DevelopmentHandler(http.server.SimpleHTTPRequestHandler):
             return
         super().do_GET()
 
+    def log_request(self, code: int | str = "-", size: int | str = "-") -> None:
+        if self.path.split("?", 1)[0] != "/__julia_reload":
+            super().log_request(code, size)
+
     def end_headers(self) -> None:
         self.send_header("Cache-Control", "no-store, max-age=0")
         self.send_header("Pragma", "no-cache")
