@@ -23,7 +23,7 @@ course = "Main"
 recipe = "scaling"
 servings = 8
 name = "Custard for Eight"
-headnote = "A feast-specific description."
+description = "A feast-specific description."
 note = "Served with berries."
 
 [[dishes]]

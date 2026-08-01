@@ -1,6 +1,7 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
+import json
 
 from julia_cookbook.builder import build
 
@@ -43,3 +44,41 @@ class BuilderTests(TestCase):
             self.assertIn('<section class="variations">', scaling)
             self.assertIn('vanilla-custard.html', scaling)
             self.assertIn('data-kind="timer"', html)
+            payloads = json.loads((output / "recipes.json").read_text(encoding="utf-8"))
+            croque = next(recipe for recipe in payloads if recipe["id"] == "croque")
+            ingredients = croque["shoppingIngredients"]
+            self.assertEqual(
+                [item["sourceId"] for item in ingredients],
+                ["bechamel", "bechamel", "bechamel", "mornay", "croque"],
+            )
+            self.assertEqual(ingredients[0]["quantity"], "1")
+            self.assertEqual(ingredients[3]["quantity"], "2")
+            croque_html = (output / "recipes" / "croque.html").read_text(encoding="utf-8")
+            self.assertEqual(croque_html.count('class="recipe-step dependency-step"'), 2)
+            self.assertIn("Included preparation", croque_html)
+            self.assertIn("Bechamel", croque_html)
+            self.assertIn('href="mornay.html"', croque_html)
+            self.assertIn('<span class="step-number">1.1</span>', croque_html)
+            self.assertIn('<span class="step-number">1.1.1</span>', croque_html)
+            self.assertIn('<span class="step-number">1.1.2</span>', croque_html)
+            self.assertIn('<span class="step-number">1.2</span>', croque_html)
+            self.assertEqual(croque_html.count('data-check="dependency-ingredient"'), 4)
+            self.assertIn('data-embedded-check="croque/step-1/mornay/step-2:ingredient:0"', croque_html)
+            self.assertIn('data-embedded-check="croque/step-1/mornay/step-1/bechamel/step-1:ingredient:0"', croque_html)
+            self.assertIn('data-embedded-toggle="croque/step-1/mornay/step-1/bechamel/step-1:ingredient:0"', croque_html)
+            products = next(recipe for recipe in payloads if recipe["id"] == "step-products")
+            self.assertEqual(
+                [item["name"] for item in products["shoppingIngredients"]],
+                ["eggs", "sugar"],
+            )
+            product_html = (output / "recipes" / "step-products.html").read_text(encoding="utf-8")
+            self.assertIn("From step 1, separate", product_html)
+            self.assertIn("From step 2, mix", product_html)
+            self.assertEqual(product_html.count("From earlier steps"), 2)
+            self.assertEqual(product_html.count("Produces"), 2)
+            self.assertEqual(product_html.count('data-check="input"'), 2)
+            self.assertIn('data-input-index="0"', product_html)
+            self.assertIn('href="#step-1">From step 1, separate</a>', product_html)
+            self.assertIn('href="#step-2">From step 2, mix</a>', product_html)
+            self.assertIn('<span class="input-origin">(from step 1)</span>', product_html)
+            self.assertIn('<span class="input-origin">(from step 2)</span>', product_html)

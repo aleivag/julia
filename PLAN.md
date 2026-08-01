@@ -80,10 +80,18 @@ recipe
      ├── title         (optional: prep, brine, rub, cook, rest, ...)
      ├── prose         (instructions, with inline annotations)
      ├── ingredients[] (qty, unit, item, note, attrs) ← derived → left column
+     ├── inputs[]      (intermediate products consumed from earlier steps)
+     ├── outputs[]     (products created by this step for later steps)
      ├── equipment[]   (#cookware)               ← derived → margin callouts
      ├── timers[]      (~timers)                  ← derived → inline, non-scaling
      └── parameters[]  ($temp, etc.)              ← derived → inline, converts
 ```
+
+Ingredients are external inputs: things the cook obtains before starting and
+that belong in aggregate recipe and shopping lists. Step inputs and outputs are
+internal products such as separated egg yolks, custard, dough, or a prepared
+sauce. They appear in the steps that produce or consume them but never become
+shopping-list entries.
 
 Recipes can include an optional, concise headnote in frontmatter. It appears on
 the cookbook index and should usually be one sentence:
@@ -118,6 +126,15 @@ Prepare @recipe{artichoke-leche-de-tigre}{2%cups} and keep it cold.
 The referenced recipe remains independently searchable and can use metadata such
 as `family: leche-de-tigre` to group peer preparations.
 
+On an individual recipe page, a dependency should render as a full-width,
+foldable recipe step rather than as a small ingredient-row disclosure. Opening
+the step reveals the dependency's normal two-column steps in place. Nested
+dependencies use the same presentation recursively; all remain collapsed by
+default, and each retains an optional link to its standalone recipe page. Child
+steps use hierarchical display numbers (`3.1`, `3.1.1`, and so on), while Cook
+Mode persistence uses stable recipe/step paths rather than those mutable display
+numbers.
+
 Inline annotation grammar (Cooklang-style — see open question on adoption):
 
 | Syntax                             | Meaning     | Behavior                                  |
@@ -133,6 +150,46 @@ Inline annotation grammar (Cooklang-style — see open question on adoption):
 | `~{2%min}` / `~name{2%min}`        | timer       | rendered inline; **does not scale**       |
 | `~brine{1-4%hours}`                | timer range | minimum/maximum window for Cook Mode      |
 | `$temp{275%F}`                     | temperature | rendered inline; converts, does not scale |
+| `=>custard{}`                      | step output | product created by this step; not shopped |
+| `^custard{}`                       | step input  | product consumed from an earlier step     |
+
+The step input/output markers make the distinction between purchased
+ingredients and intermediate products explicit:
+
+```markdown
+== step separate eggs ==
+Separate @large eggs{5} into =>egg yolks{5} and =>egg whites{5}.
+
+== step make custard ==
+Whisk ^egg yolks{5} with @sugar{1/3%cup} and @heavy cream{2%cups}
+to produce =>custard{}.
+
+== step fill ==
+Divide ^custard{} among 6 #ramekins{}.
+```
+
+The annotation grammar is converging on one common shape:
+
+```ebnf
+annotation = marker, name, quantity, [note], [attributes] ;
+marker     = "@" | "#" | "~" | "$" | "=>" | "^" ;
+name       = { any character except "{" or newline } ;
+quantity   = "{", [amount, ["%", unit]], "}" ;
+note       = "(", text, ")" ;
+attributes = "[", attribute, {",", attribute}, "]" ;
+attribute  = key, ["=", value] ;
+```
+
+Names are not limited to ASCII words: punctuation, spaces, numbers, hyphens,
+and Unicode are needed for names such as `St. Louis-style ribs`, `12-quart
+stockpot`, and `Gruyère`. Structural delimiters (`{}`, `()`, and `[]`) currently
+must open and close on the same physical line.
+
+There are two intentional exceptions to the common shape:
+
+- An anonymous timer may omit its name: `~{2%min}`.
+- A recipe dependency has a slug block followed by a requested quantity block:
+  `@recipe{mornay-sauce}{1 1/4%cups}`.
 
 Example recipe file:
 
@@ -246,6 +303,14 @@ Renders (per step) as:
 - Timer ranges represent process windows: "ready after 1 hour, remove by 4 hours."
 
 ### Shopping lists & components
+- Shopping lists traverse recipe dependencies and step relationships until they
+  reach external `@ingredient{}` leaves. `=>outputs{}` and `^inputs{}` are
+  preparation state, not purchases, and must never be aggregated.
+- The recipe-level ingredient list should likewise show the external inputs
+  needed to begin the recipe, including recursively expanded dependency inputs.
+- A step may show both external ingredients and intermediate inputs. Intermediate
+  inputs should identify their producing step (for example, "custard — from step
+  2") rather than looking like another item to buy.
 - julia should support two shopping-list views:
   - **Grouped by component**: ingredients are grouped under their step title
     (`Prep`, `Brine`, `Rub`, `Glaze`). This helps with mise en place and cooking
@@ -334,6 +399,8 @@ it is not required to build, browse, or cook.
 - [ ] **Shopping list / meal plan** — aggregate ingredients across selected recipes,
       with grouped-by-component and merged-by-ingredient views.
 - [ ] **Cross-references + master/variation relationships.**
+- [x] **Step products** — explicit `=>outputs{}` and `^inputs{}` with lineage,
+      validation, and shopping-list exclusion.
 - [ ] **Parser diagnostics** — friendly line-numbered errors and suggestions for
       common draft mistakes.
 - [ ] **Deploy to GitHub Pages** (and any static host), $0 hosting.
@@ -369,6 +436,9 @@ it is not required to build, browse, or cook.
 - **Search**: build-time index (e.g. client-side fuzzy search) vs. none for v1.
 - **Cross-reference / variation syntax**: how to express "see recipe X" and
   "variation of Y" in the recipe file.
+- **Step product identity**: whether names alone identify outputs within a recipe
+  or whether duplicate names require explicit IDs/from-step attributes. The
+  current surface syntax is `=>output{qty%unit}` and `^input{qty%unit}`.
 - **Units**: conversion (metric ↔ imperial), fraction handling (½, ⅓), pluralization.
 - **Shopping-list merging rules**: when similar ingredients can merge, when
   attributes prevent merging, and when julia should show a warning.
@@ -410,6 +480,8 @@ Private guest, allergy, and address data should live in a separate private feast
 repository even when recipes are public.
 
 Feast dishes may customize guest-facing presentation while retaining their
-recipe relationship: `name` overrides the recipe title, `headnote` overrides
-the recipe headnote, and `note` appends feast-specific context. This affects the
-menu and feast overview, not the source recipe or kitchen instructions.
+recipe relationship: `name` overrides the recipe title, `description` replaces
+the recipe headnote with menu-specific text, and `note` appends feast-specific
+context. The older feast field `headnote` remains an alias for `description`.
+These fields affect the menu and feast overview, not the source recipe or kitchen
+instructions.

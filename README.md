@@ -16,7 +16,8 @@ julia feast serve . --watch
 ```
 
 Projects contain a `.julia` TOML configuration file and a `recipes/` directory.
-See `PLAN.md` for the recipe language and product design.
+See [RECIPE_FORMAT.md](RECIPE_FORMAT.md) for the recipe language and `PLAN.md`
+for the broader product design.
 
 Cookbook identity is separate from the Julia framework:
 
@@ -49,14 +50,34 @@ repository, not a public cookbook.
 Dish presentation can be customized without changing the underlying recipe:
 
 ```toml
+title = "Summer Dinner"
+
 [[dishes]]
 course = "Dessert"
 recipe = "sous-vide-creme-brulee"
 name = "Vanilla Custard, Burnt Sugar"
-headnote = "A feast-specific description that replaces the recipe headnote."
+description = "Silky vanilla custard with a crisp caramel top."
 note = "Served with late-summer berries."
 ```
 
-`name` overrides the recipe title, `headnote` overrides its index headnote, and
-`note` is appended. The older `description` field remains an alias for
-`headnote`.
+Dish presentation fields are scoped to that feast; they do not modify the
+referenced recipe:
+
+- `name` replaces the recipe title in the feast overview and printable menu.
+- `description` replaces the recipe headnote with menu-specific descriptive text.
+- `note` is appended after the effective description for feast-specific context,
+  such as service or pairing details.
+
+If an override is omitted, Julia falls back to the referenced recipe's title or
+headnote. The older feast field `headnote` remains a backward-compatible alias
+for `description`, but new feasts should use `description`.
+
+A menu-only dish without a recipe can use the same presentation fields:
+
+```toml
+[[dishes]]
+course = "Dessert"
+name = "Seasonal Ice Cream"
+description = "Tonight's market flavor."
+note = "Served with crisp wafers."
+```

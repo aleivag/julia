@@ -69,9 +69,16 @@ def _attributes(raw: str) -> dict[str, str]:
 
 
 def _annotation(text: str, start: int, path: str, line: int) -> tuple[Annotation, int]:
-    marker = text[start]
-    kind = {"@": "ingredient", "#": "equipment", "~": "timer", "$": "parameter"}[marker]
-    cursor = start + 1
+    marker = "=>" if text.startswith("=>", start) else text[start]
+    kind = {
+        "@": "ingredient",
+        "#": "equipment",
+        "~": "timer",
+        "$": "parameter",
+        "=>": "output",
+        "^": "input",
+    }[marker]
+    cursor = start + len(marker)
     brace = text.find("{", cursor)
     if brace < 0:
         raise RecipeSyntaxError(path, line, f"{kind} marker has no quantity block", "Add {...}, even when it is empty.")
@@ -97,8 +104,8 @@ def _annotation(text: str, start: int, path: str, line: int) -> tuple[Annotation
             unit=unit.strip() if separator else "", note=note.strip(), attributes=attrs,
             source=SourceLocation(path, line, start + 1),
         ), cursor
-    if marker == "@" and not name:
-        raise RecipeSyntaxError(path, line, "ingredient name is empty")
+    if marker in {"@", "=>", "^"} and not name:
+        raise RecipeSyntaxError(path, line, f"{kind} name is empty")
     if body.count("%") > 1:
         quantity, separator, unit = body.replace("%", " "), "", ""
     else:
@@ -141,13 +148,14 @@ def _render_inline(raw: str, annotations: list[Annotation], path: str, line: int
                 output.append(f'<a href="{html.escape(href)}">{html.escape(label)}</a>')
                 cursor = target_end + 1
                 continue
-        if raw[cursor] in "@#~$":
+        if raw.startswith("=>", cursor) or raw[cursor] in "@#~$^":
             annotation, end = _annotation(raw, cursor, path, line)
             ingredient_index = sum(item.kind == "ingredient" for item in annotations)
+            input_index = sum(item.kind == "input" for item in annotations)
             annotations.append(annotation)
             label = annotation.name
             ingredient_label = html.escape(annotation.name)
-            if annotation.kind == "ingredient" and annotation.quantity:
+            if annotation.kind in {"ingredient", "input", "output"} and annotation.quantity:
                 measure = " ".join(part for part in (annotation.quantity, annotation.unit) if part)
                 fixed = ' data-scale-item="false"' if annotation.attributes.get("scale") == "false" else ""
                 ingredient_label = f'<span class="inline-measure" data-quantity="{html.escape(annotation.quantity)}" data-unit="{html.escape(annotation.unit)}"{fixed}>{html.escape(measure)}</span> {html.escape(annotation.name)}'
@@ -165,7 +173,12 @@ def _render_inline(raw: str, annotations: list[Annotation], path: str, line: int
             if annotation.kind == "ingredient":
                 attrs.append(f'data-ingredient-index="{ingredient_index}"')
                 attrs.extend(('role="checkbox"', 'aria-checked="false"', 'tabindex="0"', 'title="Mark ingredient used"'))
-            rendered_label = ingredient_label if annotation.kind == "ingredient" else label if annotation.kind == "subrecipe" else html.escape(label)
+            elif annotation.kind == "input":
+                attrs.append(f'data-input-index="{input_index}"')
+                attrs.extend(('role="checkbox"', 'aria-checked="false"', 'tabindex="0"', 'title="Mark intermediate used"'))
+            rendered_label = ingredient_label if annotation.kind in {"ingredient", "input", "output"} else label if annotation.kind == "subrecipe" else html.escape(label)
+            if annotation.kind == "input":
+                rendered_label += f' <span class="input-origin" data-input-origin="{input_index}"></span>'
             output.append(f"<span {' '.join(attrs)}>{rendered_label}</span>")
             cursor = end
             continue
@@ -201,6 +214,8 @@ def _parse_step(raw_lines: list[tuple[int, str]], title: str, step_id: str, path
         markdown="\n".join(text for _, text in raw_lines).strip(),
         html="\n".join(paragraphs),
         ingredients=[a for a in annotations if a.kind == "ingredient"],
+        inputs=[a for a in annotations if a.kind == "input"],
+        outputs=[a for a in annotations if a.kind == "output"],
         equipment=[a for a in annotations if a.kind == "equipment"],
         timers=[a for a in annotations if a.kind == "timer"],
         parameters=[a for a in annotations if a.kind == "parameter"],

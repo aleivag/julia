@@ -78,3 +78,24 @@ Mix @recipe{leche-de-tigre}{2%cups} with @salmon{1%lb}.
             self.assertEqual(step.subrecipes[0].name, "leche-de-tigre")
             self.assertEqual(step.subrecipes[0].quantity, "2")
             self.assertIn("../recipes/leche-de-tigre.html", step.html)
+
+    def test_parses_step_outputs_and_inputs_separately_from_ingredients(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "custard.md"
+            path.write_text("""---
+title: Custard
+---
+== step separate ==
+Separate @large eggs{5} into =>egg yolks{5} and =>egg whites{5}.
+== step mix ==
+Whisk ^egg yolks{5} with @cream{2%cups} to produce =>custard{}.
+""", encoding="utf-8")
+
+            recipe = parse_recipe(path)
+
+            self.assertEqual([item.name for item in recipe.steps[0].ingredients], ["large eggs"])
+            self.assertEqual([item.name for item in recipe.steps[0].outputs], ["egg yolks", "egg whites"])
+            self.assertEqual([item.name for item in recipe.steps[1].inputs], ["egg yolks"])
+            self.assertEqual([item.name for item in recipe.steps[1].outputs], ["custard"])
+            self.assertIn('data-kind="output"', recipe.steps[0].html)
+            self.assertIn('data-kind="input"', recipe.steps[1].html)

@@ -34,6 +34,8 @@ class Step:
     markdown: str
     html: str
     ingredients: list[Annotation] = field(default_factory=list)
+    inputs: list[Annotation] = field(default_factory=list)
+    outputs: list[Annotation] = field(default_factory=list)
     equipment: list[Annotation] = field(default_factory=list)
     timers: list[Annotation] = field(default_factory=list)
     parameters: list[Annotation] = field(default_factory=list)
@@ -46,6 +48,8 @@ class Step:
             "title": self.title,
             "html": self.html,
             "ingredients": [item.to_dict() for item in self.ingredients],
+            "inputs": [item.to_dict() for item in self.inputs],
+            "outputs": [item.to_dict() for item in self.outputs],
             "equipment": [item.to_dict() for item in self.equipment],
             "timers": [item.to_dict() for item in self.timers],
             "parameters": [item.to_dict() for item in self.parameters],

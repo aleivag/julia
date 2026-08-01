@@ -8,6 +8,12 @@ from html import escape
 from pathlib import Path
 from typing import Any
 
+from .dependencies import (
+    amount as _amount,
+    display_amount as _display_amount,
+    scaled_quantity as _scaled_quantity,
+    walk_recipe as _walk_recipe,
+)
 from .models import Recipe
 
 
@@ -65,7 +71,7 @@ def _dish_name(dish: FeastDish, recipes: dict[str, Recipe]) -> str:
 
 
 def _dish_description(dish: FeastDish, recipes: dict[str, Recipe]) -> str:
-    override = dish.headnote or dish.description
+    override = dish.description or dish.headnote
     recipe = recipes.get(dish.recipe)
     base = override or (str(recipe.metadata.get("headnote", "")) if recipe else "")
     return " ".join(part for part in (base, dish.note) if part)
@@ -80,30 +86,6 @@ def _grouped_dishes(feast: Feast) -> list[tuple[str, list[FeastDish]]]:
     return groups
 
 
-def _amount(value: str) -> float | None:
-    value = value.strip()
-    mixed = re.fullmatch(r"(\d+)\s+(\d+)/(\d+)", value)
-    if mixed:
-        return float(mixed[1]) + float(mixed[2]) / float(mixed[3])
-    fraction = re.fullmatch(r"(\d+)/(\d+)", value)
-    if fraction:
-        return float(fraction[1]) / float(fraction[2])
-    try:
-        return float(value)
-    except ValueError:
-        return None
-
-
-def _display_amount(value: float) -> str:
-    common = ((0.25, "1/4"), (1 / 3, "1/3"), (0.5, "1/2"), (2 / 3, "2/3"), (0.75, "3/4"))
-    whole = int(value)
-    remainder = value - whole
-    for number, label in common:
-        if abs(remainder - number) < 0.02:
-            return f"{whole} {label}" if whole else label
-    return f"{value:.2f}".rstrip("0").rstrip(".")
-
-
 def _recipe_scale(feast: Feast, dish: FeastDish, recipe: Recipe) -> float:
     desired = dish.servings or feast.serves
     if not desired:
@@ -113,42 +95,9 @@ def _recipe_scale(feast: Feast, dish: FeastDish, recipe: Recipe) -> float:
     return desired / base if base else 1.0
 
 
-def _scaled_quantity(quantity: str, scale: float) -> str:
-    amount = _amount(quantity)
-    return _display_amount(amount * scale) if amount is not None else quantity
-
-
 def _scaled_step_html(step_html: str, scale: float) -> str:
     pattern = re.compile(r'(<span class="inline-measure" data-quantity="([^"]*)"[^>]*>)(.*?)(</span>)')
     return pattern.sub(lambda match: f'{match.group(1)}{escape(_scaled_quantity(match.group(2), scale))}{match.group(4)}', step_html)
-
-
-def _yield_amount(recipe: Recipe) -> float | None:
-    match = re.match(r"\s*(\d+(?:\.\d+)?(?:\s+\d+/\d+|/\d+)?)", str(recipe.metadata.get("yield", "")))
-    return _amount(match.group(1)) if match else None
-
-
-def _dependency_scale(reference: Any, parent_scale: float, dependency: Recipe) -> float:
-    requested = _amount(reference.quantity)
-    produced = _yield_amount(dependency)
-    if requested is not None and produced:
-        return requested * parent_scale / produced
-    return parent_scale
-
-
-def _walk_recipe(recipe: Recipe, scale: float, recipes: dict[str, Recipe], trail: tuple[str, ...] = ()) -> list[tuple[Recipe, float]]:
-    if recipe.id in trail:
-        chain = " -> ".join((*trail, recipe.id))
-        raise ValueError(f"circular recipe dependency: {chain}")
-    result: list[tuple[Recipe, float]] = []
-    for step in recipe.steps:
-        for reference in step.subrecipes:
-            dependency = recipes.get(reference.name)
-            if not dependency:
-                raise ValueError(f"{recipe.path}: unknown subrecipe '{reference.name}'")
-            result.extend(_walk_recipe(dependency, _dependency_scale(reference, scale, dependency), recipes, (*trail, recipe.id)))
-    result.append((recipe, scale))
-    return result
 
 
 def render_menu(feast: Feast, recipes: dict[str, Recipe], stylesheet: str = "../../assets/styles.css") -> str:

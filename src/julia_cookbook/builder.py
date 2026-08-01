@@ -8,6 +8,7 @@ from html import escape
 from pathlib import Path
 from typing import Any
 
+from .dependencies import dependency_scale, scaled_quantity, validate_step_products, walk_recipe
 from .models import Annotation, Recipe
 from .parser import parse_recipe
 from .feasts import build_feasts
@@ -98,7 +99,153 @@ def _shell(title: str, content: str, site: dict[str, Any], page: str, data: dict
 </html>'''
 
 
-def _recipe_page(recipe: Recipe, site: dict[str, Any], sync: dict[str, Any]) -> str:
+def _scaled_embedded_html(value: str, scale: float, step_key: str) -> str:
+    pattern = re.compile(
+        r'(<span class="inline-measure" data-quantity=")([^"]*)(" data-unit=")([^"]*)("[^>]*>)(.*?)(</span>)'
+    )
+
+    def replace(match: re.Match[str]) -> str:
+        quantity = scaled_quantity(match.group(2), scale)
+        display = " ".join(part for part in (quantity, match.group(4)) if part)
+        return f"{match.group(1)}{escape(quantity)}{match.group(3)}{match.group(4)}{match.group(5)}{escape(display)}{match.group(7)}"
+
+    rendered = pattern.sub(replace, value)
+    rendered = re.sub(
+        r'data-ingredient-index="([^"]*)"',
+        lambda match: f'data-embedded-toggle="{escape(step_key)}:ingredient:{match.group(1)}"',
+        rendered,
+    )
+    return re.sub(
+        r'data-input-index="([^"]*)"',
+        lambda match: f'data-embedded-toggle="{escape(step_key)}:input:{match.group(1)}"',
+        rendered,
+    )
+
+
+def _render_input_origins(
+    value: str,
+    inputs: list[Annotation],
+    product_sources: dict[str, tuple[int | str, str]],
+) -> str:
+    for index, item in enumerate(inputs):
+        source_number, _ = product_sources[item.name.casefold()]
+        placeholder = f'<span class="input-origin" data-input-origin="{index}"></span>'
+        value = value.replace(placeholder, f'<span class="input-origin">(from step {source_number})</span>')
+    return value
+
+
+def _step_number(parts: tuple[int, ...]) -> str:
+    return ".".join(str(part) for part in parts)
+
+
+def _embedded_anchor(parts: tuple[int, ...]) -> str:
+    return f"embedded-step-{'-'.join(str(part) for part in parts)}"
+
+
+def _is_dependency_step(step: Any) -> bool:
+    return (
+        len(step.subrecipes) == 1
+        and not step.ingredients
+        and not step.inputs
+        and not step.equipment
+    )
+
+
+def _embedded_recipe_steps(
+    dependency: Recipe,
+    recipes: dict[str, Recipe],
+    scale: float,
+    number_prefix: tuple[int, ...],
+    dependency_path: tuple[str, ...],
+) -> str:
+    rendered_steps = []
+    product_sources: dict[str, tuple[str, str]] = {}
+    for index, step in enumerate(dependency.steps, start=1):
+        number_parts = (*number_prefix, index)
+        number = _step_number(number_parts)
+        step_key = "/".join((*dependency_path, step.id))
+        if _is_dependency_step(step):
+            rendered_steps.append(
+                _dependency_step(
+                    step.subrecipes[0], recipes, scale, number_parts,
+                    (*dependency_path, step.id), dependency_path,
+                )
+            )
+        else:
+            ingredient_rows = []
+            for ingredient_index, ingredient in enumerate(step.ingredients):
+                quantity = ingredient.quantity if ingredient.attributes.get("scale") == "false" else scaled_quantity(ingredient.quantity, scale)
+                display = " ".join(part for part in (quantity, ingredient.unit) if part) or "as needed"
+                fixed = ' data-scale-item="false"' if ingredient.attributes.get("scale") == "false" else ""
+                note = f'<small>{escape(ingredient.note)}</small>' if ingredient.note else ""
+                check_key = f"{step_key}:ingredient:{ingredient_index}"
+                ingredient_rows.append(
+                    f'<li><label><input type="checkbox" data-check="dependency-ingredient" data-key="{escape(check_key)}" data-embedded-check="{escape(check_key)}"><span class="measure" data-quantity="{escape(quantity)}" data-unit="{escape(ingredient.unit)}"{fixed}>{escape(display)}</span><span>{escape(ingredient.name)}</span>{note}</label></li>'
+                )
+            input_rows = []
+            for input_index, item in enumerate(step.inputs):
+                quantity = scaled_quantity(item.quantity, scale)
+                display = " ".join(part for part in (quantity, item.unit) if part) or "as needed"
+                source_number, source_title = product_sources[item.name.casefold()]
+                source_label = f"From step {source_number}" + (f", {source_title}" if source_title else "")
+                check_key = f"{step_key}:input:{input_index}"
+                input_rows.append(
+                    f'<li><label><input type="checkbox" data-check="dependency-input" data-key="{escape(check_key)}" data-embedded-check="{escape(check_key)}"><span class="measure" data-quantity="{escape(quantity)}" data-unit="{escape(item.unit)}">{escape(display)}</span><span>{escape(item.name)}</span><small><a href="#{_embedded_anchor(tuple(int(part) for part in source_number.split('.')))}">{escape(source_label)}</a></small></label></li>'
+                )
+            output_rows = [
+                f'<li><span class="measure" data-quantity="{escape(scaled_quantity(item.quantity, scale))}" data-unit="{escape(item.unit)}">{escape(" ".join(part for part in (scaled_quantity(item.quantity, scale), item.unit) if part) or "as needed")}</span><span>{escape(item.name)}</span></li>'
+                for item in step.outputs
+            ]
+            instructions = _render_input_origins(
+                _scaled_embedded_html(step.html, scale, step_key), step.inputs, product_sources
+            )
+            heading = f'<p class="component">{escape(step.title)}</p>' if step.title else ""
+            inputs = f'<div class="step-products"><p>From earlier steps</p><ul>{"".join(input_rows)}</ul></div>' if input_rows else ""
+            outputs = f'<div class="step-products outputs"><p>Produces</p><ul>{"".join(output_rows)}</ul></div>' if output_rows else ""
+            nested = "".join(
+                _dependency_step(item, recipes, scale, (*number_parts, child_index), (*dependency_path, step.id, f"dependency-{child_index}"), dependency_path)
+                for child_index, item in enumerate(step.subrecipes, start=1)
+            )
+            rendered_steps.append(f'''<article class="recipe-step embedded-tree-step" id="{_embedded_anchor(number_parts)}" data-embedded-step>
+              <aside>{heading}<ul class="ingredient-list">{"".join(ingredient_rows)}</ul>{inputs}{outputs}</aside>
+              <section class="instructions"><div class="step-heading"><span class="step-number">{number}</span><label><input type="checkbox" data-check="dependency-step" data-key="{escape(step_key)}" data-step-completion><span>Step complete</span></label></div>{instructions}</section>
+            </article>{nested}''')
+        for item in step.outputs:
+            product_sources[item.name.casefold()] = (number, step.title)
+    return "".join(rendered_steps)
+
+
+def _dependency_step(
+    reference: Annotation,
+    recipes: dict[str, Recipe],
+    parent_scale: float,
+    number_parts: tuple[int, ...],
+    step_path: tuple[str, ...],
+    trail: tuple[str, ...],
+    root_step_id: str = "",
+) -> str:
+    dependency = recipes[reference.name]
+    if dependency.id in trail:
+        chain = " -> ".join((*trail, dependency.id))
+        raise ValueError(f"circular recipe dependency: {chain}")
+    scale = dependency_scale(reference, parent_scale, dependency)
+    requested = scaled_quantity(reference.quantity, parent_scale)
+    requested_display = " ".join(part for part in (requested, reference.unit) if part) or "as needed"
+    number = _step_number(number_parts)
+    step_key = "/".join((*step_path, dependency.id))
+    anchor = root_step_id or _embedded_anchor(number_parts)
+    check_kind = "step" if root_step_id else "dependency-step"
+    data_step = f' data-step="{escape(root_step_id)}"' if root_step_id else ""
+    children = _embedded_recipe_steps(
+        dependency, recipes, scale, number_parts, (*step_path, dependency.id)
+    )
+    return f'''<details class="recipe-step dependency-step" id="{escape(anchor)}"{data_step} data-dependency-node>
+      <summary class="dependency-step-summary"><aside><p class="component">Included recipe</p><span class="measure" data-quantity="{escape(requested)}" data-unit="{escape(reference.unit)}">{escape(requested_display)}</span></aside><section class="instructions"><div class="step-heading"><span class="step-number">{number}</span><label><input type="checkbox" data-check="{check_kind}" data-key="{escape(root_step_id or step_key)}" data-step-completion><span>Step complete</span></label></div><p>Prepare <span class="inline-measure" data-quantity="{escape(requested)}" data-unit="{escape(reference.unit)}">{escape(requested_display)}</span> <strong>{escape(dependency.title)}</strong>.</p></section></summary>
+      <div class="dependency-children"><div class="embedded-recipe-head"><span>Included preparation</span><a href="{escape(dependency.id)}.html">Open full recipe</a></div>{children}</div>
+    </details>'''
+
+
+def _recipe_page(recipe: Recipe, recipes: dict[str, Recipe], site: dict[str, Any], sync: dict[str, Any]) -> str:
     meta = recipe.metadata
     blurb_html = f'<section class="recipe-blurb">{recipe.blurb_html}</section>' if recipe.blurb_html else ""
     unit_system = str(meta.get("units", site.get("unit_system", "international"))).lower()
@@ -151,6 +298,7 @@ def _recipe_page(recipe: Recipe, site: dict[str, Any], sync: dict[str, Any]) -> 
     ratio_base = next((item for item in all_ingredients if item.attributes.get("base") == "true"), None)
     if ratio_base is None:
         ratio_base = next((item for item in all_ingredients if item.unit.lower() in {"g", "kg", "oz", "lb"}), None)
+    product_sources: dict[str, tuple[int, str]] = {}
     for index, step in enumerate(recipe.steps):
         ingredient_rows = []
         for i, item in enumerate(step.ingredients):
@@ -166,16 +314,47 @@ def _recipe_page(recipe: Recipe, site: dict[str, Any], sync: dict[str, Any]) -> 
                 measure_attrs += f' data-ratio="{escape(item.quantity)}" data-base-quantity="{escape(item_ratio_base.quantity)}" data-base-unit="{escape(item_ratio_base.unit)}"'
             ingredient_rows.append(f'''<li><label><input type="checkbox" data-check="ingredient" data-key="{step.id}:{i}" data-ingredient-index="{i}"><span class="measure" {measure_attrs}>{escape(display)}</span> <span>{escape(item.name)}</span>{f'<small>{escape(item.note)}</small>' if item.note else ''}</label><label class="actual-used">Used <input type="number" min="0" step="any" inputmode="decimal" data-actual="{step.id}:{i}" data-ingredient-name="{escape(item.name)}"{ratio_attrs}> <span>{escape(actual_unit)}</span></label><p class="ratio-warning" data-ratio-warning="{step.id}:{i}"></p></li>''')
         ingredients = "".join(ingredient_rows)
-        subrecipes = "".join(
-            f'''<li class="subrecipe-row"><a href="{escape(item.name)}.html"><span class="measure" data-quantity="{escape(item.quantity)}" data-unit="{escape(item.unit)}">{escape(_quantity(item))}</span><span>{escape(item.name.replace("-", " ").title())}</span><small>Subrecipe</small></a></li>'''
-            for item in step.subrecipes
+        input_rows = []
+        for input_index, item in enumerate(step.inputs):
+            source_number, source_title = product_sources[item.name.casefold()]
+            source_label = f"step {source_number}"
+            if source_title:
+                source_label += f", {source_title}"
+            input_rows.append(
+                f'<li><label><input type="checkbox" data-check="input" data-key="{step.id}:{input_index}" data-input-index="{input_index}"><span class="measure" data-quantity="{escape(item.quantity)}" data-unit="{escape(item.unit)}">{escape(_quantity(item))}</span> <span>{escape(item.name)}</span><small><a href="#step-{source_number}">From {escape(source_label)}</a></small></label></li>'
+            )
+        output_rows = [
+            f'<li><span class="measure" data-quantity="{escape(item.quantity)}" data-unit="{escape(item.unit)}">{escape(_quantity(item))}</span> <span>{escape(item.name)}</span></li>'
+            for item in step.outputs
+        ]
+        inputs = f'<div class="step-products"><p>From earlier steps</p><ul>{"".join(input_rows)}</ul></div>' if input_rows else ""
+        outputs = f'<div class="step-products outputs"><p>Produces</p><ul>{"".join(output_rows)}</ul></div>' if output_rows else ""
+        if _is_dependency_step(step):
+            steps.append(
+                _dependency_step(
+                    step.subrecipes[0], recipes, 1.0, (index + 1,),
+                    (recipe.id, step.id), (recipe.id,), root_step_id=step.id,
+                )
+            )
+            for item in step.outputs:
+                product_sources[item.name.casefold()] = (index + 1, step.title)
+            continue
+        nested_dependencies = "".join(
+            _dependency_step(
+                item, recipes, 1.0, (index + 1, child_index),
+                (recipe.id, step.id, f"dependency-{child_index}"), (recipe.id,),
+            )
+            for child_index, item in enumerate(step.subrecipes, start=1)
         )
         equipment = "".join(f'<span class="equipment-chip">{escape(item.name)}</span>' for item in step.equipment)
         heading = f'<p class="component">{escape(step.title)}</p>' if step.title else ""
+        step_html = _render_input_origins(step.html, step.inputs, product_sources)
         steps.append(f'''<article class="recipe-step" id="{step.id}" data-step="{step.id}">
-          <aside>{heading}<ul class="ingredient-list">{ingredients}{subrecipes}{'<li class="muted">No ingredients</li>' if not ingredients and not subrecipes else ''}</ul>{equipment}</aside>
-          <section class="instructions"><div class="step-heading"><span class="step-number">{index + 1}</span><label><input type="checkbox" data-check="step" data-key="{step.id}"><span>Step complete</span></label></div>{step.html}<textarea data-step-note="{step.id}" placeholder="Note from this cook" aria-label="Notes for step {index + 1}"></textarea></section>
-        </article>''')
+          <aside>{heading}<ul class="ingredient-list">{ingredients}{'<li class="muted">No external ingredients</li>' if not ingredients and not input_rows else ''}</ul>{inputs}{outputs}{equipment}</aside>
+          <section class="instructions"><div class="step-heading"><span class="step-number">{index + 1}</span><label><input type="checkbox" data-check="step" data-key="{step.id}"><span>Step complete</span></label></div>{step_html}<textarea data-step-note="{step.id}" placeholder="Note from this cook" aria-label="Notes for step {index + 1}"></textarea></section>
+        </article>{nested_dependencies}''')
+        for item in step.outputs:
+            product_sources[item.name.casefold()] = (index + 1, step.title)
     yield_text = escape(str(meta.get("yield", "Not specified")))
     anchor_controls = []
     for control in scale_controls:
@@ -199,7 +378,33 @@ def _source_page(recipe: Recipe, site: dict[str, Any], sync: dict[str, Any]) -> 
     return _shell(f"Source: {recipe.title}", content, site, "recipe", data)
 
 
-def _index_page(recipes: list[Recipe], site: dict[str, Any], sync: dict[str, Any], feasts: list[Any] | None = None) -> str:
+def _recipe_payloads(recipes: list[Recipe]) -> list[dict[str, Any]]:
+    recipe_map = {recipe.id: recipe for recipe in recipes}
+    payloads = []
+    for recipe in recipes:
+        payload = recipe.to_dict()
+        shopping_ingredients = []
+        for expanded, scale in walk_recipe(recipe, 1.0, recipe_map):
+            for step in expanded.steps:
+                for ingredient in step.ingredients:
+                    item = ingredient.to_dict()
+                    item["quantity"] = scaled_quantity(ingredient.quantity, scale)
+                    item["sourceId"] = expanded.id
+                    item["sourceTitle"] = expanded.title
+                    item["component"] = step.title
+                    shopping_ingredients.append(item)
+        payload["shoppingIngredients"] = shopping_ingredients
+        payloads.append(payload)
+    return payloads
+
+
+def _index_page(
+    recipes: list[Recipe],
+    recipe_payloads: list[dict[str, Any]],
+    site: dict[str, Any],
+    sync: dict[str, Any],
+    feasts: list[Any] | None = None,
+) -> str:
     cards = []
     for recipe in recipes:
         tags = " ".join(str(tag) for tag in recipe.metadata.get("tags", []))
@@ -215,7 +420,7 @@ def _index_page(recipes: list[Recipe], site: dict[str, Any], sync: dict[str, Any
     content = f'''<section class="library-head"><div><p class="eyebrow">The working collection</p><h1>{escape(str(site.get('title', 'My Cookbook')))}</h1><p>{escape(str(site.get('description', 'Recipes tested, adjusted, and kept.')))}</p></div><div class="library-tools"><label class="search"><span class="sr-only">Search recipes</span><input type="search" data-search placeholder="Search recipes"></label><button data-action="open-shopping">Shopping list <span data-selected-count>0</span></button></div></section>
       {feast_section}<section class="recipe-grid" aria-label="Recipes">{''.join(cards)}</section><p class="empty-state" hidden data-empty>No recipes match your search.</p>
       <dialog id="shopping-dialog" class="shopping-dialog"><form method="dialog" class="dialog-head"><h2>Shopping list</h2><button class="icon-button" aria-label="Close">&times;</button></form><div class="shopping-tabs"><button class="active" data-shopping-view="merged">Merged</button><button data-shopping-view="component">By recipe</button></div><div data-shopping-list></div><div class="button-row"><button data-action="copy-shopping">Copy list</button><button class="secondary" data-action="clear-shopping">Clear</button></div></dialog>'''
-    data = {"recipes": [recipe.to_dict() for recipe in recipes], "sync": {"googleClientId": sync.get("google_client_id", "")}}
+    data = {"recipes": recipe_payloads, "sync": {"googleClientId": sync.get("google_client_id", "")}}
     return _shell(str(site.get("title", "My Cookbook")), content, site, "index", data)
 
 
@@ -231,12 +436,16 @@ def build(root: str | Path = ".") -> tuple[Path, list[Recipe]]:
     if not recipe_dir.is_dir():
         raise FileNotFoundError(f"Recipe directory not found: {recipe_dir}")
     recipes = sorted((parse_recipe(path) for path in recipe_dir.glob("*.md")), key=lambda item: item.title.lower())
+    for recipe in recipes:
+        validate_step_products(recipe)
+    recipe_map = {recipe.id: recipe for recipe in recipes}
     recipe_ids = {recipe.id for recipe in recipes}
     for recipe in recipes:
         for step in recipe.steps:
             for reference in step.subrecipes:
                 if reference.name not in recipe_ids:
                     raise ValueError(f"{recipe.path}:{step.line}: unknown subrecipe '{reference.name}'")
+    recipe_payloads = _recipe_payloads(recipes)
     output = root_path / str(site.get("output", "build"))
     (output / "recipes").mkdir(parents=True, exist_ok=True)
     (output / "sources").mkdir(parents=True, exist_ok=True)
@@ -246,14 +455,14 @@ def build(root: str | Path = ".") -> tuple[Path, list[Recipe]]:
     for stale in (output / "sources").glob("*.html"):
         stale.unlink()
     for recipe in recipes:
-        (output / "recipes" / f"{recipe.id}.html").write_text(_recipe_page(recipe, site, sync), encoding="utf-8")
+        (output / "recipes" / f"{recipe.id}.html").write_text(_recipe_page(recipe, recipe_map, site, sync), encoding="utf-8")
         (output / "sources" / f"{recipe.id}.html").write_text(_source_page(recipe, site, sync), encoding="utf-8")
     feasts = build_feasts(root_path, output, recipes)
-    (output / "index.html").write_text(_index_page(recipes, site, sync, feasts), encoding="utf-8")
+    (output / "index.html").write_text(_index_page(recipes, recipe_payloads, site, sync, feasts), encoding="utf-8")
     for asset in ("styles.css", "app.js", "icon.svg"):
         shutil.copyfile(PACKAGE_DIR / "assets" / asset, output / "assets" / asset)
     shutil.copyfile(PACKAGE_DIR / "assets" / "sw.js", output / "sw.js")
     manifest = {"name": site.get("title", "My Cookbook"), "short_name": site.get("title", "Cookbook"), "start_url": "./index.html", "display": "standalone", "background_color": "#f7f3e8", "theme_color": "#f7f3e8", "icons": [{"src": "assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"}]}
     (output / "manifest.webmanifest").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-    (output / "recipes.json").write_text(json.dumps([recipe.to_dict() for recipe in recipes], indent=2), encoding="utf-8")
+    (output / "recipes.json").write_text(json.dumps(recipe_payloads, indent=2), encoding="utf-8")
     return output, recipes

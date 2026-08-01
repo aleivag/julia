@@ -97,9 +97,20 @@
       document.querySelector("[data-progress]").value = checked;
       document.querySelector("[data-progress-text]").textContent = `${checked} of ${recipe.steps.length} steps`;
       document.querySelectorAll("[data-step]").forEach(step => step.classList.toggle("complete", step.querySelector('[data-check="step"]').checked));
+      document.querySelectorAll("[data-embedded-step]").forEach(step => step.classList.toggle("complete", step.querySelector('[data-step-completion]').checked));
+      document.querySelectorAll("[data-dependency-node]").forEach(step => step.classList.toggle("complete", step.querySelector(':scope > summary [data-step-completion]').checked));
       document.querySelectorAll('[data-check="ingredient"]').forEach(input => {
         const step = input.closest("[data-step]");
         const inline = step?.querySelector(`.instructions [data-ingredient-index="${input.dataset.ingredientIndex}"]`);
+        inline?.classList.toggle("checked", input.checked); inline?.setAttribute("aria-checked", String(input.checked));
+      });
+      document.querySelectorAll('[data-check="input"]').forEach(input => {
+        const step = input.closest("[data-step]");
+        const inline = step?.querySelector(`.instructions [data-input-index="${input.dataset.inputIndex}"]`);
+        inline?.classList.toggle("checked", input.checked); inline?.setAttribute("aria-checked", String(input.checked));
+      });
+      document.querySelectorAll('[data-embedded-check]').forEach(input => {
+        const inline = document.querySelector(`[data-embedded-toggle="${CSS.escape(input.dataset.embeddedCheck)}"]`);
         inline?.classList.toggle("checked", input.checked); inline?.setAttribute("aria-checked", String(input.checked));
       });
     };
@@ -125,9 +136,46 @@
       store.active[recipe.id] = session; saveStore(); enterCook(session); toast("Cook started"); document.querySelector("#step-1")?.scrollIntoView();
     });
     document.querySelectorAll("[data-check]").forEach(input => input.addEventListener("change", persistActive));
+    const syncDependencyAncestors = source => {
+      let node = source.closest("[data-dependency-node]");
+      if (node?.querySelector(':scope > summary [data-step-completion]') === source) node = node.parentElement.closest("[data-dependency-node]");
+      while (node) {
+        const parent = node.querySelector(':scope > summary [data-step-completion]');
+        const children = [...node.querySelectorAll(':scope > .dependency-children [data-step-completion]')];
+        parent.checked = children.length > 0 && children.every(child => child.checked);
+        node = node.parentElement.closest("[data-dependency-node]");
+      }
+    };
+    document.querySelectorAll("[data-step-completion]").forEach(input => {
+      input.addEventListener("click", event => event.stopPropagation());
+      input.addEventListener("change", () => {
+        const node = input.closest("[data-dependency-node]");
+        if (node?.querySelector(':scope > summary [data-step-completion]') === input) {
+          node.querySelectorAll(':scope > .dependency-children [data-step-completion]').forEach(child => { child.checked = input.checked; });
+        }
+        syncDependencyAncestors(input); persistActive();
+      });
+    });
+    document.querySelectorAll(".dependency-step-summary label,.dependency-step-summary a").forEach(control => control.addEventListener("click", event => event.stopPropagation()));
     document.querySelectorAll('.instructions [role="checkbox"][data-ingredient-index]').forEach(inline => {
       const toggle = () => {
         const input = inline.closest("[data-step]")?.querySelector(`[data-check="ingredient"][data-ingredient-index="${inline.dataset.ingredientIndex}"]`);
+        if (!input) return; input.checked = !input.checked; input.dispatchEvent(new Event("change", { bubbles: true }));
+      };
+      inline.addEventListener("click", toggle);
+      inline.addEventListener("keydown", event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggle(); } });
+    });
+    document.querySelectorAll('.instructions [role="checkbox"][data-input-index]').forEach(inline => {
+      const toggle = () => {
+        const input = inline.closest("[data-step]")?.querySelector(`[data-check="input"][data-input-index="${inline.dataset.inputIndex}"]`);
+        if (!input) return; input.checked = !input.checked; input.dispatchEvent(new Event("change", { bubbles: true }));
+      };
+      inline.addEventListener("click", toggle);
+      inline.addEventListener("keydown", event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggle(); } });
+    });
+    document.querySelectorAll('[role="checkbox"][data-embedded-toggle]').forEach(inline => {
+      const toggle = () => {
+        const input = document.querySelector(`[data-embedded-check="${CSS.escape(inline.dataset.embeddedToggle)}"]`);
         if (!input) return; input.checked = !input.checked; input.dispatchEvent(new Event("change", { bubbles: true }));
       };
       inline.addEventListener("click", toggle);
@@ -181,11 +229,12 @@
     let view = "merged";
     const renderShopping = () => {
       const recipes = payload.recipes.filter(recipe => selected.has(recipe.id)), groups = new Map();
-      recipes.forEach(recipe => recipe.steps.forEach(step => step.ingredients.forEach(item => {
-        const key = view === "merged" ? `${item.name.toLowerCase()}|${JSON.stringify(item.attributes)}` : recipe.metadata.title;
-        if (!groups.has(key)) groups.set(key, { title: view === "merged" ? item.name : recipe.metadata.title, items: [] });
+      recipes.forEach(recipe => (recipe.shoppingIngredients || recipe.steps.flatMap(step => step.ingredients)).forEach(item => {
+        const source = item.sourceTitle || recipe.metadata.title;
+        const key = view === "merged" ? `${item.name.toLowerCase()}|${JSON.stringify(item.attributes)}` : source;
+        if (!groups.has(key)) groups.set(key, { title: view === "merged" ? item.name : source, items: [] });
         groups.get(key).items.push(view === "merged" ? `${item.quantity}${item.unit ? " " + item.unit : ""}`.trim() || "as needed" : `${item.quantity}${item.unit ? " " + item.unit : ""} ${item.name}`.trim());
-      })));
+      }));
       document.querySelector("[data-shopping-list]").innerHTML = groups.size ? [...groups.values()].map(group => `<section class="shopping-group"><h3>${escapeHtml(group.title)}</h3><ul>${group.items.map(item => `<li><label><input type="checkbox"> ${escapeHtml(item)}</label></li>`).join("")}</ul></section>`).join("") : '<p class="muted">Select recipes from the collection first.</p>';
     };
     document.querySelector('[data-action="open-shopping"]').addEventListener("click", () => { renderShopping(); document.querySelector("#shopping-dialog").showModal(); });
