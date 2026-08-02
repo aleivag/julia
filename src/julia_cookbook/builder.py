@@ -4,16 +4,25 @@ import json
 import shutil
 import hashlib
 import re
+import unicodedata
 from html import escape
 from pathlib import Path
 from typing import Any
 
-from .dependencies import dependency_scale, scaled_quantity, validate_step_products, walk_recipe
+from .dependencies import default_steps, dependency_scale, scaled_quantity, validate_step_products, walk_recipe
 from .models import Annotation, Recipe
 from .parser import parse_recipe
 from .feasts import build_feasts
+from .yields import parse_yield
 
 PACKAGE_DIR = Path(__file__).parent
+
+
+def _search_key(value: str) -> str:
+    return "".join(
+        character for character in unicodedata.normalize("NFKD", value.casefold())
+        if not unicodedata.combining(character)
+    )
 
 
 def load_config(root: Path) -> dict[str, Any]:
@@ -28,6 +37,18 @@ def load_config(root: Path) -> dict[str, Any]:
 
 def _quantity(item: Annotation) -> str:
     return " ".join(part for part in (item.quantity, item.unit) if part) or "as needed"
+
+
+def _product_measure(item: Annotation, quantity: str | None = None) -> str:
+    value = item.quantity if quantity is None else quantity
+    if not value and not item.unit:
+        return '<span class="measure"></span>'
+    display = " ".join(part for part in (value, item.unit) if part)
+    return f'<span class="measure" data-quantity="{escape(value)}" data-unit="{escape(item.unit)}"{_scale_mode_attr(item)}>{escape(display)}</span>'
+
+
+def _scale_mode_attr(item: Annotation) -> str:
+    return ' data-scale-mode="count"' if item.attributes.get("scale") == "count" else ""
 
 
 def _numeric_quantity(value: str) -> float | None:
@@ -185,15 +206,14 @@ def _embedded_recipe_steps(
             input_rows = []
             for input_index, item in enumerate(step.inputs):
                 quantity = scaled_quantity(item.quantity, scale)
-                display = " ".join(part for part in (quantity, item.unit) if part) or "as needed"
                 source_number, source_title = product_sources[item.name.casefold()]
                 source_label = f"From step {source_number}" + (f", {source_title}" if source_title else "")
                 check_key = f"{step_key}:input:{input_index}"
                 input_rows.append(
-                    f'<li><label><input type="checkbox" data-check="dependency-input" data-key="{escape(check_key)}" data-embedded-check="{escape(check_key)}"><span class="measure" data-quantity="{escape(quantity)}" data-unit="{escape(item.unit)}">{escape(display)}</span><span>{escape(item.name)}</span><small><a href="#{_embedded_anchor(tuple(int(part) for part in source_number.split('.')))}">{escape(source_label)}</a></small></label></li>'
+                    f'<li><label><input type="checkbox" data-check="dependency-input" data-key="{escape(check_key)}" data-embedded-check="{escape(check_key)}">{_product_measure(item, quantity)}<span>{escape(item.name)}</span><small><a href="#{_embedded_anchor(tuple(int(part) for part in source_number.split('.')))}">{escape(source_label)}</a></small></label></li>'
                 )
             output_rows = [
-                f'<li><span class="measure" data-quantity="{escape(scaled_quantity(item.quantity, scale))}" data-unit="{escape(item.unit)}">{escape(" ".join(part for part in (scaled_quantity(item.quantity, scale), item.unit) if part) or "as needed")}</span><span>{escape(item.name)}</span></li>'
+                f'<li>{_product_measure(item, scaled_quantity(item.quantity, scale))}<span>{escape(item.name)}</span></li>'
                 for item in step.outputs
             ]
             instructions = _render_input_origins(
@@ -245,6 +265,55 @@ def _dependency_step(
     </details>'''
 
 
+def _step_groups(recipe: Recipe) -> list[list[Any]]:
+    groups = []
+    index = 0
+    while index < len(recipe.steps):
+        step = recipe.steps[index]
+        choice = step.attributes.get("choice", "")
+        group = [step]
+        index += 1
+        while choice and index < len(recipe.steps) and recipe.steps[index].attributes.get("choice") == choice:
+            group.append(recipe.steps[index])
+            index += 1
+        groups.append(group)
+    return groups
+
+
+def _choice_step(group: list[Any], display_number: int) -> str:
+    choice = group[0].attributes["choice"]
+    default = next((step for step in group if step.attributes.get("default") == "true"), group[0])
+    controls = []
+    panels = []
+    for step in group:
+        option = step.attributes["option"]
+        selected = step is default
+        controls.append(
+            f'<label><input type="radio" name="choice-{escape(choice)}" value="{escape(option)}" data-choice-select{" checked" if selected else ""}><span>{escape(option.replace("-", " ").title())}</span></label>'
+        )
+        step_key = f"choice/{choice}/{option}/{step.id}"
+        ingredients = []
+        for index, item in enumerate(step.ingredients):
+            check_key = f"{step_key}:ingredient:{index}"
+            ingredients.append(
+                f'<li><label><input type="checkbox" data-check="choice-ingredient" data-key="{escape(check_key)}" data-embedded-check="{escape(check_key)}"><span class="measure" data-quantity="{escape(item.quantity)}" data-unit="{escape(item.unit)}">{escape(_quantity(item))}</span><span>{escape(item.name)}</span>{f"<small>{escape(item.note)}</small>" if item.note else ""}</label></li>'
+            )
+        outputs = "".join(
+            f'<li>{_product_measure(item)}<span>{escape(item.name)}</span></li>'
+            for item in step.outputs
+        )
+        instructions = _scaled_embedded_html(step.html, 1.0, step_key)
+        panels.append(f'''<section class="choice-option" data-choice-panel="{escape(option)}"{"" if selected else " hidden"}>
+          <aside><ul class="ingredient-list">{"".join(ingredients)}</ul>{f'<div class="step-products outputs"><p>Produces</p><ul>{outputs}</ul></div>' if outputs else ''}</aside>
+          <div class="instructions">{instructions}</div>
+        </section>''')
+    title = group[0].title or choice.replace("-", " ")
+    return f'''<article class="recipe-step choice-step" id="step-{display_number}" data-step="choice-{escape(choice)}" data-choice-step="{escape(choice)}" data-choice-default="{escape(default.attributes['option'])}">
+      <aside><p class="component">Choose one</p><div class="choice-controls">{"".join(controls)}</div></aside>
+      <section class="instructions"><div class="step-heading"><span class="step-number">{display_number}</span><label><input type="checkbox" data-check="step" data-key="choice-{escape(choice)}"><span>Step complete</span></label></div><h3>{escape(title)}</h3><div class="choice-panels">{"".join(panels)}</div></section>
+    </article>'''
+
+
 def _recipe_page(recipe: Recipe, recipes: dict[str, Recipe], site: dict[str, Any], sync: dict[str, Any]) -> str:
     meta = recipe.metadata
     blurb_html = f'<section class="recipe-blurb">{recipe.blurb_html}</section>' if recipe.blurb_html else ""
@@ -278,12 +347,13 @@ def _recipe_page(recipe: Recipe, recipes: dict[str, Recipe], site: dict[str, Any
         )
         variation_html = f'<section class="variations"><h2>Variations</h2><ul>{variation_links}</ul></section>'
     steps = []
-    all_ingredients = [item for recipe_step in recipe.steps for item in recipe_step.ingredients]
+    yield_spec = parse_yield(str(meta.get("yield", "")))
+    all_ingredients = [item for recipe_step in default_steps(recipe) for item in recipe_step.ingredients]
     scale_anchors = [item for item in all_ingredients if item.attributes.get("scale") == "true"]
     if len(scale_anchors) > 1:
         raise ValueError(f"{recipe.path}: recipe has more than one ingredient with scale=true")
     scale_controls = []
-    if scale_anchors:
+    if scale_anchors and not (yield_spec and yield_spec.compound):
         item = scale_anchors[0]
         amount = _numeric_quantity(item.quantity)
         if amount is None or amount <= 0:
@@ -293,13 +363,20 @@ def _recipe_page(recipe: Recipe, recipes: dict[str, Recipe], site: dict[str, Any
     yield_amount = _numeric_quantity(yield_match.group(1)) if yield_match else None
     yield_label = yield_match.group(2).strip() if yield_match else ""
     duplicates_ingredient = bool(scale_controls and yield_label.lower() in {scale_controls[0]["label"].lower(), scale_controls[0]["unit"].lower()})
-    if yield_amount and yield_amount > 0 and not duplicates_ingredient:
+    if yield_amount and yield_amount > 0 and not duplicates_ingredient and not (yield_spec and yield_spec.compound):
         scale_controls.append({"label": (yield_label or "Yield").title(), "amount": yield_amount, "unit": "", "step": str(meta.get("scale_step", "1"))})
     ratio_base = next((item for item in all_ingredients if item.attributes.get("base") == "true"), None)
     if ratio_base is None:
         ratio_base = next((item for item in all_ingredients if item.unit.lower() in {"g", "kg", "oz", "lb"}), None)
     product_sources: dict[str, tuple[int, str]] = {}
-    for index, step in enumerate(recipe.steps):
+    step_groups = _step_groups(recipe)
+    for index, group in enumerate(step_groups):
+        step = group[0]
+        if step.attributes.get("choice"):
+            steps.append(_choice_step(group, index + 1))
+            for item in step.outputs:
+                product_sources[item.name.casefold()] = (index + 1, step.title)
+            continue
         ingredient_rows = []
         for i, item in enumerate(step.ingredients):
             is_ratio = item.unit.lower() == "bakers"
@@ -321,10 +398,10 @@ def _recipe_page(recipe: Recipe, recipes: dict[str, Recipe], site: dict[str, Any
             if source_title:
                 source_label += f", {source_title}"
             input_rows.append(
-                f'<li><label><input type="checkbox" data-check="input" data-key="{step.id}:{input_index}" data-input-index="{input_index}"><span class="measure" data-quantity="{escape(item.quantity)}" data-unit="{escape(item.unit)}">{escape(_quantity(item))}</span> <span>{escape(item.name)}</span><small><a href="#step-{source_number}">From {escape(source_label)}</a></small></label></li>'
+                f'<li><label><input type="checkbox" data-check="input" data-key="{step.id}:{input_index}" data-input-index="{input_index}">{_product_measure(item)} <span>{escape(item.name)}</span><small><a href="#step-{source_number}">From {escape(source_label)}</a></small></label></li>'
             )
         output_rows = [
-            f'<li><span class="measure" data-quantity="{escape(item.quantity)}" data-unit="{escape(item.unit)}">{escape(_quantity(item))}</span> <span>{escape(item.name)}</span></li>'
+            f'<li>{_product_measure(item)} <span>{escape(item.name)}</span></li>'
             for item in step.outputs
         ]
         inputs = f'<div class="step-products"><p>From earlier steps</p><ul>{"".join(input_rows)}</ul></div>' if input_rows else ""
@@ -349,7 +426,7 @@ def _recipe_page(recipe: Recipe, recipes: dict[str, Recipe], site: dict[str, Any
         equipment = "".join(f'<span class="equipment-chip">{escape(item.name)}</span>' for item in step.equipment)
         heading = f'<p class="component">{escape(step.title)}</p>' if step.title else ""
         step_html = _render_input_origins(step.html, step.inputs, product_sources)
-        steps.append(f'''<article class="recipe-step" id="{step.id}" data-step="{step.id}">
+        steps.append(f'''<article class="recipe-step" id="step-{index + 1}" data-step="{step.id}">
           <aside>{heading}<ul class="ingredient-list">{ingredients}{'<li class="muted">No external ingredients</li>' if not ingredients and not input_rows else ''}</ul>{inputs}{outputs}{equipment}</aside>
           <section class="instructions"><div class="step-heading"><span class="step-number">{index + 1}</span><label><input type="checkbox" data-check="step" data-key="{step.id}"><span>Step complete</span></label></div>{step_html}<textarea data-step-note="{step.id}" placeholder="Note from this cook" aria-label="Notes for step {index + 1}"></textarea></section>
         </article>{nested_dependencies}''')
@@ -361,10 +438,17 @@ def _recipe_page(recipe: Recipe, recipes: dict[str, Recipe], site: dict[str, Any
         anchor_value = f'{control["amount"]:g}'
         anchor_controls.append(f'''<label class="anchor-control"><span>{escape(control["label"])}</span><span><input type="number" min="0.01" step="{escape(control["step"])}" value="{anchor_value}" data-scale-anchor data-anchor-original="{anchor_value}" data-anchor-label="{escape(control["label"])}" data-anchor-unit="{escape(control["unit"])}"> {escape(control["unit"])}</span></label>''')
     anchor_control = "".join(anchor_controls)
-    scale_panel = f'''<details class="scale-panel"><summary><span>Scale &amp; units</span><strong data-scale-summary>Original</strong></summary><div class="scale-panel-body">{anchor_control}<label class="quick-scale"><span>Quick scale</span><select data-scale><option value="0.5">Half</option><option value="1" selected>Original</option><option value="1.5">1.5x</option><option value="2">Double</option><option value="3">Triple</option><option value="custom" hidden>Custom</option></select></label><fieldset class="unit-system"><legend>Temperature</legend><div role="group" aria-label="Temperature units"><button type="button" data-unit-system="international">International</button><button type="button" data-unit-system="imperial">Imperial</button></div></fieldset></div></details>'''
+    compound_control = ""
+    if yield_spec and yield_spec.compound:
+        count = f"{yield_spec.count:g}"
+        each = f"{yield_spec.each:g}"
+        precision = "~" if yield_spec.approximate else ""
+        tolerance = f' ± {yield_spec.tolerance:g} {escape(yield_spec.unit)}' if yield_spec.tolerance is not None else ""
+        compound_control = f'''<div class="compound-yield" data-compound-yield data-original-count="{count}" data-original-each="{each}" data-each-unit="{escape(yield_spec.unit)}"><label><span>Count</span><span class="compound-field"><input type="number" min="1" step="1" value="{count}" data-yield-count><span>{escape(yield_spec.item)}</span></span></label><span class="compound-times">×</span><label><span>Each</span><span class="compound-field"><input type="number" min="0.01" step="any" value="{each}" data-yield-each><span>{escape(yield_spec.unit)}</span></span></label><div class="compound-target"><span>Target</span><strong>= <output data-yield-total>{yield_spec.total:g}</output> {escape(yield_spec.unit)}</strong></div><small>{precision}{each} {escape(yield_spec.unit)} each{tolerance}</small></div>'''
+    scale_panel = f'''<details class="scale-panel"><summary><span>Scale &amp; units</span><strong data-scale-summary>Original</strong></summary><div class="scale-panel-body">{compound_control}{anchor_control}<label class="quick-scale"><span>Quick scale</span><select data-scale><option value="0.5">Half</option><option value="1" selected>Original</option><option value="1.5">1.5x</option><option value="2">Double</option><option value="3">Triple</option><option value="custom" hidden>Custom</option></select></label><fieldset class="unit-system"><legend>Temperature</legend><div role="group" aria-label="Temperature units"><button type="button" data-unit-system="international">International</button><button type="button" data-unit-system="imperial">Imperial</button></div></fieldset></div></details>'''
     content = f'''<header class="recipe-hero"><div><p class="eyebrow">Recipe</p><h1>{escape(recipe.title)}</h1><p class="recipe-yield">Makes <strong>{yield_text}</strong></p>{source}<div class="tag-list">{tags}</div></div>
       {relationship_html}<div class="recipe-actions"><button class="primary" data-action="start-cook">Make this recipe</button><a class="source-button" href="../sources/{recipe.id}.html">Show source</a></div></header>
-      <div class="progress-wrap" hidden data-progress-wrap><div><span data-progress-text>0 of {len(recipe.steps)} steps</span><button class="text-button" data-action="finish-cook">Finish cook</button></div><progress max="{len(recipe.steps)}" value="0" data-progress></progress></div>
+      <div class="progress-wrap" hidden data-progress-wrap><div><span data-progress-text>0 of {len(step_groups)} steps</span><button class="text-button" data-action="finish-cook">Finish cook</button></div><progress max="{len(step_groups)}" value="0" data-progress></progress></div>
       <section class="recipe-body">{blurb_html}{scale_panel}{''.join(steps)}{variation_html}<section class="cook-history"><p class="eyebrow">Cook log</p><h2>Past experiments</h2><div data-cook-history><p class="muted">No completed cooks on this device yet.</p></div></section></section>
       <dialog id="finish-dialog" class="finish-dialog"><form method="dialog" data-finish-form><div class="dialog-head"><h2>Finish this cook</h2><button class="icon-button" value="cancel" aria-label="Close">&times;</button></div><label>Outcome<select name="outcome"><option value="worked">Worked well</option><option value="change">Would change</option><option value="failed">Did not work</option></select></label><label>Summary<textarea name="summary" placeholder="What will you remember next time?"></textarea></label><div class="button-row"><button class="primary" value="default">Save cooking event</button><button type="button" class="secondary danger" data-action="discard-cook">Discard cook</button></div></form></dialog>'''
     data = {"recipe": recipe.to_dict(), "units": unit_system, "sync": {"googleClientId": sync.get("google_client_id", "")}}
@@ -392,6 +476,10 @@ def _recipe_payloads(recipes: list[Recipe]) -> list[dict[str, Any]]:
                     item["sourceId"] = expanded.id
                     item["sourceTitle"] = expanded.title
                     item["component"] = step.title
+                    if step.attributes.get("choice"):
+                        item["choice"] = step.attributes["choice"]
+                        item["option"] = step.attributes.get("option", "")
+                        item["default"] = step.attributes.get("default") == "true"
                     shopping_ingredients.append(item)
         payload["shoppingIngredients"] = shopping_ingredients
         payloads.append(payload)
@@ -411,7 +499,7 @@ def _index_page(
         family = str(recipe.metadata.get("family", ""))
         ingredient_count = sum(len(step.ingredients) for step in recipe.steps)
         headnote = str(recipe.metadata.get("headnote") or recipe.metadata.get("description") or recipe.metadata.get("yield", "Flexible yield"))
-        cards.append(f'''<article class="recipe-card" data-search="{escape((recipe.title + ' ' + tags + ' ' + family).lower())}" data-tags="{escape(tags + ' ' + family)}">
+        cards.append(f'''<article class="recipe-card" data-search="{escape(_search_key(recipe.title + ' ' + tags + ' ' + family))}" data-tags="{escape(_search_key(tags + ' ' + family))}">
           <label class="select-recipe"><input type="checkbox" data-meal-recipe="{recipe.id}" aria-label="Add {escape(recipe.title)} to shopping list"></label>
           <a href="recipes/{recipe.id}.html"><p class="eyebrow">{len(recipe.steps)} steps &middot; {ingredient_count} ingredients</p><h2>{escape(recipe.title)}</h2><p>{escape(headnote)}</p><div class="tag-list">{''.join(f'<span>{escape(str(tag))}</span>' for tag in recipe.metadata.get('tags', []))}</div></a>
         </article>''')

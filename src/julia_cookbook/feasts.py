@@ -10,6 +10,7 @@ from typing import Any
 
 from .dependencies import (
     amount as _amount,
+    default_steps,
     display_amount as _display_amount,
     scaled_quantity as _scaled_quantity,
     walk_recipe as _walk_recipe,
@@ -132,7 +133,7 @@ def render_shopping(feast: Feast, recipes: dict[str, Recipe]) -> str:
         if not recipe:
             continue
         for expanded, scale in _walk_recipe(recipe, _recipe_scale(feast, dish, recipe), recipes):
-            for step in expanded.steps:
+            for step in default_steps(expanded):
                 for ingredient in step.ingredients:
                     rows.append((ingredient.name, _scaled_quantity(ingredient.quantity, scale), ingredient.unit, expanded.title))
     merged: dict[tuple[str, str], tuple[str, str, float, set[str]]] = {}
@@ -167,7 +168,7 @@ def render_booklet(feast: Feast, recipes: dict[str, Recipe]) -> str:
             if expanded.id in included:
                 continue
             included.add(expanded.id)
-            steps = "".join(f'<section class="booklet-step"><aside>{"".join(f"<div>{escape(_scaled_quantity(i.quantity, scale))} {escape(i.unit)} {escape(i.name)}</div>" for i in step.ingredients)}{"".join(f"<div class=\"booklet-dependency\">{escape(_scaled_quantity(r.quantity, scale))} {escape(r.unit)} {escape(r.name.replace("-", " ").title())}</div>" for r in step.subrecipes)}</aside><div><h3>{escape(step.title)}</h3>{_scaled_step_html(step.html, scale).replace("../recipes/", "../../recipes/")}</div></section>' for step in expanded.steps)
+            steps = "".join(f'<section class="booklet-step"><aside>{"".join(f"<div>{escape(_scaled_quantity(i.quantity, scale))} {escape(i.unit)} {escape(i.name)}</div>" for i in step.ingredients)}{"".join(f"<div class=\"booklet-dependency\">{escape(_scaled_quantity(r.quantity, scale))} {escape(r.unit)} {escape(r.name.replace("-", " ").title())}</div>" for r in step.subrecipes)}</aside><div><h3>{escape(step.title)}</h3>{_scaled_step_html(step.html, scale).replace("../recipes/", "../../recipes/")}</div></section>' for step in default_steps(expanded))
             sections.append(f'<article class="booklet-recipe"><h2>{escape(expanded.title)}</h2>{steps}</article>')
     return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{escape(feast.title)} · Kitchen Booklet</title><link rel="stylesheet" href="../../assets/styles.css"></head><body class="feast-page"><main class="feast-document"><a href="index.html">Back to feast</a><h1>{escape(feast.title)}</h1><p>Kitchen booklet</p>{''.join(sections)}</main></body></html>'''
 

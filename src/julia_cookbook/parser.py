@@ -11,6 +11,8 @@ from .models import Annotation, Recipe, RecipeSyntaxError, SourceLocation, Step
 STEP_RE = re.compile(r"^==\s*step(?:\s+(.+?))?\s*==$", re.IGNORECASE)
 POSSIBLE_STEP_RE = re.compile(r"^==.*==$")
 SLUG_RE = re.compile(r"[^a-z0-9]+")
+YOUTUBE_ID_RE = re.compile(r"[A-Za-z0-9_-]{11}")
+YOUTUBE_OPTIONS = {"start", "end", "autoplay", "mute", "loop", "controls", "captions", "title"}
 
 
 def slugify(value: str) -> str:
@@ -66,6 +68,55 @@ def _attributes(raw: str) -> dict[str, str]:
         key, separator, value = pair.partition("=")
         result[key.strip()] = value.strip().strip("\"'") if separator else "true"
     return result
+
+
+def _youtube_seconds(value: str, path: str, line: int, option: str) -> int:
+    value = value.strip().lower()
+    if value.isdigit():
+        return int(value)
+    match = re.fullmatch(r"(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?", value)
+    if not match or not any(match.groups()):
+        raise RecipeSyntaxError(path, line, f"invalid YouTube {option} time '{value}'", "Use seconds or a duration such as 1m30s.")
+    hours, minutes, seconds = (int(part or 0) for part in match.groups())
+    return hours * 3600 + minutes * 60 + seconds
+
+
+def _youtube_embed(raw: str, start: int, path: str, line: int) -> tuple[str, int]:
+    brace = start + len("!youtube")
+    video_id, cursor = _balanced(raw, brace, "{", "}", path, line)
+    video_id = video_id.strip()
+    if not YOUTUBE_ID_RE.fullmatch(video_id):
+        raise RecipeSyntaxError(path, line, f"invalid YouTube video ID '{video_id}'", "Use the 11-character ID from the YouTube URL.")
+    attributes: dict[str, str] = {}
+    if cursor < len(raw) and raw[cursor] == "[":
+        option_text, cursor = _balanced(raw, cursor, "[", "]", path, line)
+        attributes = _attributes(option_text)
+    unknown = set(attributes) - YOUTUBE_OPTIONS
+    if unknown:
+        name = sorted(unknown)[0]
+        raise RecipeSyntaxError(path, line, f"unknown YouTube option '{name}'", f"Use one of: {', '.join(sorted(YOUTUBE_OPTIONS))}.")
+    params: list[tuple[str, str]] = []
+    for option in ("start", "end"):
+        if option in attributes:
+            params.append((option, str(_youtube_seconds(attributes[option], path, line, option))))
+    for option in ("autoplay", "mute", "controls"):
+        if option in attributes:
+            value = attributes[option].lower()
+            if value not in {"true", "false"}:
+                raise RecipeSyntaxError(path, line, f"YouTube option '{option}' must be true or false")
+            params.append((option, "1" if value == "true" else "0"))
+    for option in ("loop", "captions"):
+        if attributes.get(option, "false").lower() not in {"true", "false"}:
+            raise RecipeSyntaxError(path, line, f"YouTube option '{option}' must be true or false")
+    if attributes.get("loop", "false").lower() == "true":
+        params.extend((("loop", "1"), ("playlist", video_id)))
+    if attributes.get("captions", "false").lower() == "true":
+        params.append(("cc_load_policy", "1"))
+    query = "&amp;".join(f"{key}={html.escape(value)}" for key, value in params)
+    src = f"https://www.youtube-nocookie.com/embed/{video_id}" + (f"?{query}" if query else "")
+    title = html.escape(attributes.get("title", "YouTube video player"))
+    embed = f'<span class="video-embed"><iframe src="{src}" title="{title}" loading="lazy" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe></span>'
+    return embed, cursor
 
 
 def _annotation(text: str, start: int, path: str, line: int) -> tuple[Annotation, int]:
@@ -133,6 +184,10 @@ def _render_inline(raw: str, annotations: list[Annotation], path: str, line: int
     output: list[str] = []
     cursor = 0
     while cursor < len(raw):
+        if raw.startswith("!youtube{", cursor):
+            embed, cursor = _youtube_embed(raw, cursor, path, line)
+            output.append(embed)
+            continue
         if raw[cursor] == "[":
             label_end = raw.find("](", cursor + 1)
             target_end = raw.find(")", label_end + 2) if label_end >= 0 else -1
@@ -158,7 +213,8 @@ def _render_inline(raw: str, annotations: list[Annotation], path: str, line: int
             if annotation.kind in {"ingredient", "input", "output"} and annotation.quantity:
                 measure = " ".join(part for part in (annotation.quantity, annotation.unit) if part)
                 fixed = ' data-scale-item="false"' if annotation.attributes.get("scale") == "false" else ""
-                ingredient_label = f'<span class="inline-measure" data-quantity="{html.escape(annotation.quantity)}" data-unit="{html.escape(annotation.unit)}"{fixed}>{html.escape(measure)}</span> {html.escape(annotation.name)}'
+                mode = f' data-scale-mode="{html.escape(annotation.attributes["scale"])}"' if annotation.attributes.get("scale") == "count" else ""
+                ingredient_label = f'<span class="inline-measure" data-quantity="{html.escape(annotation.quantity)}" data-unit="{html.escape(annotation.unit)}"{fixed}{mode}>{html.escape(measure)}</span> {html.escape(annotation.name)}'
             if annotation.kind == "timer":
                 label = " ".join(part for part in (annotation.quantity, annotation.unit) if part)
             elif annotation.kind == "parameter":
@@ -194,7 +250,7 @@ def _render_inline(raw: str, annotations: list[Annotation], path: str, line: int
     return "".join(output)
 
 
-def _parse_step(raw_lines: list[tuple[int, str]], title: str, step_id: str, path: str) -> Step:
+def _parse_step(raw_lines: list[tuple[int, str]], title: str, attributes: dict[str, str], step_id: str, path: str) -> Step:
     groups: list[list[tuple[int, str]]] = [[]]
     for item in raw_lines:
         if not item[1].strip():
@@ -206,13 +262,32 @@ def _parse_step(raw_lines: list[tuple[int, str]], title: str, step_id: str, path
     annotations: list[Annotation] = []
     paragraphs = []
     for group in groups:
-        rendered = [_render_inline(text, annotations, path, number) for number, text in group]
-        paragraphs.append(f"<p>{' '.join(rendered)}</p>")
+        first_marker = re.match(r"^\s*(?:(\d+)\.|([-+*]))\s+(.+)$", group[0][1])
+        if first_marker:
+            ordered = bool(first_marker.group(1))
+            items: list[list[tuple[int, str]]] = []
+            for number, text in group:
+                marker = re.match(r"^\s*(?:(\d+)\.|([-+*]))\s+(.+)$", text)
+                if marker and bool(marker.group(1)) == ordered:
+                    items.append([(number, marker.group(3))])
+                elif items:
+                    items[-1].append((number, text.strip()))
+            rendered_items = []
+            for item in items:
+                rendered = [_render_inline(text, annotations, path, number) for number, text in item]
+                rendered_items.append(f"<li>{' '.join(rendered)}</li>")
+            tag = "ol" if ordered else "ul"
+            start = f' start="{first_marker.group(1)}"' if ordered and first_marker.group(1) != "1" else ""
+            paragraphs.append(f"<{tag}{start}>{''.join(rendered_items)}</{tag}>")
+        else:
+            rendered = [_render_inline(text, annotations, path, number) for number, text in group]
+            paragraphs.append(f"<p>{' '.join(rendered)}</p>")
     return Step(
         id=step_id,
         title=title,
         markdown="\n".join(text for _, text in raw_lines).strip(),
         html="\n".join(paragraphs),
+        attributes=attributes,
         ingredients=[a for a in annotations if a.kind == "ingredient"],
         inputs=[a for a in annotations if a.kind == "input"],
         outputs=[a for a in annotations if a.kind == "output"],
@@ -231,6 +306,7 @@ def parse_recipe(path: str | Path) -> Recipe:
     metadata, body_start = _frontmatter(lines, str(source))
     steps: list[Step] = []
     current_title = ""
+    current_attributes: dict[str, str] = {}
     current_lines: list[tuple[int, str]] = []
     blurb_lines: list[tuple[int, str]] = []
     marker_seen = False
@@ -239,7 +315,7 @@ def parse_recipe(path: str | Path) -> Recipe:
         nonlocal current_lines
         if current_lines:
             number = len(steps) + 1
-            steps.append(_parse_step(current_lines, current_title, f"step-{number}", str(source)))
+            steps.append(_parse_step(current_lines, current_title, current_attributes, f"step-{number}", str(source)))
             current_lines = []
 
     for index in range(body_start, len(lines)):
@@ -247,7 +323,10 @@ def parse_recipe(path: str | Path) -> Recipe:
         match = STEP_RE.match(raw.strip())
         if match:
             finish()
-            current_title = (match.group(1) or "").strip()
+            raw_title = (match.group(1) or "").strip()
+            attribute_match = re.fullmatch(r"(.*?)(?:\s+\[([^\]]+)\])?", raw_title)
+            current_title = (attribute_match.group(1) if attribute_match else raw_title).strip()
+            current_attributes = _attributes(attribute_match.group(2)) if attribute_match and attribute_match.group(2) else {}
             marker_seen = True
             continue
         if POSSIBLE_STEP_RE.match(raw.strip()):
@@ -259,5 +338,5 @@ def parse_recipe(path: str | Path) -> Recipe:
     finish()
     if not steps:
         raise RecipeSyntaxError(str(source), body_start + 1, "recipe contains no steps")
-    blurb_html = _parse_step(blurb_lines, "", "blurb", str(source)).html if any(text.strip() for _, text in blurb_lines) else ""
+    blurb_html = _parse_step(blurb_lines, "", {}, "blurb", str(source)).html if any(text.strip() for _, text in blurb_lines) else ""
     return Recipe(slugify(source.stem), metadata, steps, str(source), blurb_html)

@@ -36,3 +36,19 @@ class DependencyTests(TestCase):
 
             with self.assertRaisesRegex(ValueError, "has no output from an earlier step"):
                 validate_step_products(parse_recipe(path))
+
+    def test_allows_choice_options_with_the_same_output_contract(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "dough.md"
+            path.write_text("""---
+title: Dough
+---
+== step yeast [choice=yeast, option=instant, default=true] ==
+Use @instant yeast{1%g} to produce =>prepared yeast{}.
+== step yeast [choice=yeast, option=fresh] ==
+Use @fresh yeast{3%g} to produce =>prepared yeast{}.
+== step mix ==
+Mix ^prepared yeast{} with @flour{100%g}.
+""")
+
+            validate_step_products(parse_recipe(path))

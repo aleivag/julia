@@ -6,6 +6,24 @@ from typing import Any
 from .models import Recipe
 
 
+def default_steps(recipe: Recipe) -> list[Any]:
+    selected = []
+    index = 0
+    while index < len(recipe.steps):
+        step = recipe.steps[index]
+        choice = step.attributes.get("choice", "")
+        if not choice:
+            selected.append(step)
+            index += 1
+            continue
+        group = []
+        while index < len(recipe.steps) and recipe.steps[index].attributes.get("choice") == choice:
+            group.append(recipe.steps[index])
+            index += 1
+        selected.append(next((item for item in group if item.attributes.get("default") == "true"), group[0]))
+    return selected
+
+
 def amount(value: str) -> float | None:
     value = value.strip()
     mixed = re.fullmatch(r"(\d+)\s+(\d+)/(\d+)", value)
@@ -59,7 +77,7 @@ def walk_recipe(
         chain = " -> ".join((*trail, recipe.id))
         raise ValueError(f"circular recipe dependency: {chain}")
     result: list[tuple[Recipe, float]] = []
-    for step in recipe.steps:
+    for step in default_steps(recipe):
         for reference in step.subrecipes:
             dependency = recipes.get(reference.name)
             if not dependency:
@@ -72,15 +90,36 @@ def walk_recipe(
 
 def validate_step_products(recipe: Recipe) -> None:
     produced: dict[str, tuple[int, str]] = {}
-    for index, step in enumerate(recipe.steps, start=1):
-        for item in step.inputs:
-            key = item.name.casefold()
-            if key not in produced:
-                line = item.source.line if item.source else step.line
-                raise ValueError(
-                    f"{recipe.path}:{line}: step input '{item.name}' has no output from an earlier step"
-                )
-        for item in step.outputs:
+    index = 0
+    display_index = 0
+    while index < len(recipe.steps):
+        step = recipe.steps[index]
+        choice = step.attributes.get("choice", "")
+        group = [step]
+        if choice:
+            cursor = index + 1
+            while cursor < len(recipe.steps) and recipe.steps[cursor].attributes.get("choice") == choice:
+                group.append(recipe.steps[cursor])
+                cursor += 1
+            options = [item.attributes.get("option", "") for item in group]
+            if any(not option for option in options) or len(set(options)) != len(options):
+                raise ValueError(f"{recipe.path}: choice '{choice}' requires unique option names")
+            defaults = [item for item in group if item.attributes.get("default") == "true"]
+            if len(defaults) > 1:
+                raise ValueError(f"{recipe.path}: choice '{choice}' has more than one default option")
+            contracts = [{item.name.casefold() for item in branch.outputs} for branch in group]
+            if any(contract != contracts[0] for contract in contracts[1:]):
+                raise ValueError(f"{recipe.path}: choice '{choice}' options must produce the same outputs")
+        display_index += 1
+        for branch in group:
+            for item in branch.inputs:
+                key = item.name.casefold()
+                if key not in produced:
+                    line = item.source.line if item.source else branch.line
+                    raise ValueError(
+                        f"{recipe.path}:{line}: step input '{item.name}' has no output from an earlier step"
+                    )
+        for item in group[0].outputs:
             key = item.name.casefold()
             if key in produced:
                 previous, _ = produced[key]
@@ -88,4 +127,5 @@ def validate_step_products(recipe: Recipe) -> None:
                 raise ValueError(
                     f"{recipe.path}:{line}: step output '{item.name}' was already produced by step {previous}"
                 )
-            produced[key] = (index, step.title)
+            produced[key] = (display_index, step.title)
+        index += len(group)

@@ -33,6 +33,7 @@ class Step:
     title: str
     markdown: str
     html: str
+    attributes: dict[str, str] = field(default_factory=dict)
     ingredients: list[Annotation] = field(default_factory=list)
     inputs: list[Annotation] = field(default_factory=list)
     outputs: list[Annotation] = field(default_factory=list)
@@ -47,6 +48,7 @@ class Step:
             "id": self.id,
             "title": self.title,
             "html": self.html,
+            "attributes": self.attributes,
             "ingredients": [item.to_dict() for item in self.ingredients],
             "inputs": [item.to_dict() for item in self.inputs],
             "outputs": [item.to_dict() for item in self.outputs],

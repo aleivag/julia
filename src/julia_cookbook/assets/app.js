@@ -54,6 +54,12 @@
     let scale = active?.scale || 1;
     const scaleSelect = document.querySelector("[data-scale]"); scaleSelect.value = String(scale);
     const anchorInputs = [...document.querySelectorAll("[data-scale-anchor]")];
+    const compoundYield = document.querySelector("[data-compound-yield]");
+    const yieldCount = compoundYield?.querySelector("[data-yield-count]");
+    const yieldEach = compoundYield?.querySelector("[data-yield-each]");
+    const yieldTotal = compoundYield?.querySelector("[data-yield-total]");
+    if (active?.yieldCount && yieldCount) yieldCount.value = active.yieldCount;
+    if (active?.yieldEach && yieldEach) yieldEach.value = active.yieldEach;
     const scaleSummary = document.querySelector("[data-scale-summary]");
     let unitSystem = store.preferences?.[recipe.id]?.units || payload.units || "international";
     if (!scaleSelect.querySelector(`option[value="${scale}"]`)) scaleSelect.value = "custom";
@@ -61,7 +67,8 @@
     anchorInputs.forEach(input => input.value = scaledAnchorValue(input));
     const updateScaleSummary = () => {
       const anchors = anchorInputs.map(input => `${input.value}${input.dataset.anchorUnit ? " " + input.dataset.anchorUnit : ""} ${input.dataset.anchorLabel}`).join(" · ");
-      scaleSummary.textContent = `${anchors || (scale === 1 ? "Original" : `${Number(scale.toFixed(2))}x`)} · ${unitSystem === "imperial" ? "Imperial" : "International"}`;
+      const compound = compoundYield ? `${yieldCount.value} × ${yieldEach.value} ${compoundYield.dataset.eachUnit}` : "";
+      scaleSummary.textContent = `${compound || anchors || (scale === 1 ? "Original" : `${Number(scale.toFixed(2))}x`)} · ${unitSystem === "imperial" ? "Imperial" : "International"}`;
     };
     updateScaleSummary();
     const displayTemperature = (quantity, sourceUnit) => {
@@ -81,21 +88,45 @@
       store.preferences ||= {}; store.preferences[recipe.id] = { ...(store.preferences[recipe.id] || {}), units: unitSystem }; saveStore(); applyUnits();
     }));
     applyUnits();
+    const countScale = () => compoundYield ? Number(yieldCount.value) / Number(compoundYield.dataset.originalCount) : scale;
     const applyScale = () => {
-      document.querySelectorAll(".measure[data-quantity]").forEach(el => { const quantity = el.dataset.quantity, itemScale = el.dataset.scaleItem === "false" ? 1 : scale; el.textContent = quantity ? `${scaleQuantity(quantity, itemScale)}${el.dataset.unit ? " " + el.dataset.unit : ""}` : "as needed"; });
-      document.querySelectorAll(".inline-measure[data-quantity]").forEach(el => { const itemScale = el.dataset.scaleItem === "false" ? 1 : scale; el.textContent = `${scaleQuantity(el.dataset.quantity, itemScale)}${el.dataset.unit ? " " + el.dataset.unit : ""}`; });
+      document.querySelectorAll(".measure[data-quantity]").forEach(el => { const quantity = el.dataset.quantity, itemScale = el.dataset.scaleMode === "count" ? countScale() : el.dataset.scaleItem === "false" ? 1 : scale; el.textContent = quantity ? `${scaleQuantity(quantity, itemScale)}${el.dataset.unit ? " " + el.dataset.unit : ""}` : "as needed"; });
+      document.querySelectorAll(".inline-measure[data-quantity]").forEach(el => { const itemScale = el.dataset.scaleMode === "count" ? countScale() : el.dataset.scaleItem === "false" ? 1 : scale; el.textContent = `${scaleQuantity(el.dataset.quantity, itemScale)}${el.dataset.unit ? " " + el.dataset.unit : ""}`; });
+      if (yieldTotal) yieldTotal.textContent = displayNumber(Number(yieldCount.value) * Number(yieldEach.value));
     };
     const ratioMeasures = () => document.querySelectorAll("[data-ratio]").forEach(el => { const base = fraction(el.dataset.baseQuantity), ratio = fraction(el.dataset.ratio); el.textContent = base !== null && ratio !== null ? `${displayNumber(base * ratio / 100 * scale)} ${el.dataset.baseUnit} (${ratio}%)` : `${el.dataset.ratio}%`; });
     applyScale(); ratioMeasures();
-    const saveScale = () => { applyScale(); ratioMeasures(); updateScaleSummary(); if (store.active[recipe.id]) { store.active[recipe.id].scale = scale; saveStore(); } };
+    const saveScale = () => { applyScale(); ratioMeasures(); updateScaleSummary(); if (store.active[recipe.id]) { store.active[recipe.id].scale = scale; if (compoundYield) { store.active[recipe.id].yieldCount = Number(yieldCount.value); store.active[recipe.id].yieldEach = Number(yieldEach.value); } saveStore(); } };
     const updateAnchors = source => anchorInputs.forEach(input => { if (input !== source) input.value = scaledAnchorValue(input); });
-    scaleSelect.addEventListener("change", () => { if (scaleSelect.value === "custom") return; scale = Number(scaleSelect.value); updateAnchors(null); saveScale(); });
+    scaleSelect.addEventListener("change", () => { if (scaleSelect.value === "custom") return; scale = Number(scaleSelect.value); if (compoundYield) { yieldCount.value = Number(compoundYield.dataset.originalCount) * scale; yieldEach.value = compoundYield.dataset.originalEach; } updateAnchors(null); saveScale(); });
     anchorInputs.forEach(anchorInput => anchorInput.addEventListener("input", () => { const desired = Number(anchorInput.value), original = Number(anchorInput.dataset.anchorOriginal); if (!(desired > 0 && original > 0)) return; scale = desired / original; updateAnchors(anchorInput); scaleSelect.value = scaleSelect.querySelector(`option[value="${scale}"]`) ? String(scale) : "custom"; saveScale(); }));
+    [yieldCount, yieldEach].filter(Boolean).forEach(input => input.addEventListener("input", () => {
+      const total = Number(yieldCount.value) * Number(yieldEach.value);
+      const original = Number(compoundYield.dataset.originalCount) * Number(compoundYield.dataset.originalEach);
+      if (!(total > 0 && original > 0)) return;
+      scale = total / original; scaleSelect.value = "custom"; saveScale();
+    }));
+
+    document.querySelectorAll("[data-choice-step]").forEach(choiceStep => {
+      const choice = choiceStep.dataset.choiceStep;
+      const saved = store.preferences?.[recipe.id]?.choices?.[choice];
+      const select = option => {
+        choiceStep.querySelectorAll("[data-choice-panel]").forEach(panel => { panel.hidden = panel.dataset.choicePanel !== option; });
+        choiceStep.querySelectorAll("[data-choice-select]").forEach(input => { input.checked = input.value === option; });
+      };
+      select(saved || choiceStep.dataset.choiceDefault);
+      choiceStep.querySelectorAll("[data-choice-select]").forEach(input => input.addEventListener("change", () => {
+        if (!input.checked) return;
+        store.preferences ||= {}; store.preferences[recipe.id] ||= {}; store.preferences[recipe.id].choices ||= {};
+        store.preferences[recipe.id].choices[choice] = input.value; saveStore(); select(input.value);
+      }));
+    });
 
     const progress = () => {
+      const rootSteps = document.querySelectorAll("[data-step]");
       const checked = document.querySelectorAll('[data-check="step"]:checked').length;
       document.querySelector("[data-progress]").value = checked;
-      document.querySelector("[data-progress-text]").textContent = `${checked} of ${recipe.steps.length} steps`;
+      document.querySelector("[data-progress-text]").textContent = `${checked} of ${rootSteps.length} steps`;
       document.querySelectorAll("[data-step]").forEach(step => step.classList.toggle("complete", step.querySelector('[data-check="step"]').checked));
       document.querySelectorAll("[data-embedded-step]").forEach(step => step.classList.toggle("complete", step.querySelector('[data-step-completion]').checked));
       document.querySelectorAll("[data-dependency-node]").forEach(step => step.classList.toggle("complete", step.querySelector(':scope > summary [data-step-completion]').checked));
@@ -117,6 +148,7 @@
     const persistActive = () => {
       const session = store.active[recipe.id]; if (!session) { progress(); return; }
       session.scale = scale; session.checks = {}; session.notes = {}; session.actuals = {};
+      if (compoundYield) { session.yieldCount = Number(yieldCount.value); session.yieldEach = Number(yieldEach.value); }
       document.querySelectorAll("[data-check]").forEach(input => session.checks[`${input.dataset.check}:${input.dataset.key}`] = input.checked);
       document.querySelectorAll("[data-step-note]").forEach(input => session.notes[input.dataset.stepNote] = input.value);
       document.querySelectorAll("[data-actual]").forEach(input => { if (input.value) session.actuals[input.dataset.actual] = Number(input.value); });
@@ -220,16 +252,21 @@
 
   function setupIndex() {
     if (!payload.recipes) return;
+    const normalizeSearch = value => String(value).normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
     const search = document.querySelector("[data-search]");
     search.value = new URLSearchParams(location.search).get("q") || "";
-    const filter = () => { const query = search.value.toLowerCase(), tag = new URLSearchParams(location.search).get("tag")?.toLowerCase(); let shown = 0; document.querySelectorAll(".recipe-card").forEach(card => { const visible = (!query || card.dataset.search.includes(query)) && (!tag || card.dataset.tags.toLowerCase().split(" ").includes(tag)); card.hidden = !visible; shown += visible; }); document.querySelector("[data-empty]").hidden = !!shown; };
+    const filter = () => { const query = normalizeSearch(search.value), rawTag = new URLSearchParams(location.search).get("tag"), tag = rawTag ? normalizeSearch(rawTag) : null; let shown = 0; document.querySelectorAll(".recipe-card").forEach(card => { const visible = (!query || normalizeSearch(card.dataset.search).includes(query)) && (!tag || normalizeSearch(card.dataset.tags).split(" ").includes(tag)); card.hidden = !visible; shown += visible; }); document.querySelector("[data-empty]").hidden = !!shown; };
     search.addEventListener("input", filter); filter();
     const selected = new Set(); const updateCount = () => document.querySelector("[data-selected-count]").textContent = selected.size;
     document.querySelectorAll("[data-meal-recipe]").forEach(input => input.addEventListener("change", () => { input.checked ? selected.add(input.dataset.mealRecipe) : selected.delete(input.dataset.mealRecipe); updateCount(); }));
     let view = "merged";
     const renderShopping = () => {
       const recipes = payload.recipes.filter(recipe => selected.has(recipe.id)), groups = new Map();
-      recipes.forEach(recipe => (recipe.shoppingIngredients || recipe.steps.flatMap(step => step.ingredients)).forEach(item => {
+      recipes.forEach(recipe => (recipe.shoppingIngredients || recipe.steps.flatMap(step => step.ingredients)).filter(item => {
+        if (!item.choice) return true;
+        const selected = store.preferences?.[recipe.id]?.choices?.[item.choice];
+        return selected ? item.option === selected : item.default;
+      }).forEach(item => {
         const source = item.sourceTitle || recipe.metadata.title;
         const key = view === "merged" ? `${item.name.toLowerCase()}|${JSON.stringify(item.attributes)}` : source;
         if (!groups.has(key)) groups.set(key, { title: view === "merged" ? item.name : source, items: [] });

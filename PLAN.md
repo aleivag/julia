@@ -250,6 +250,12 @@ Renders (per step) as:
   `[scale=true, step=1]` (for example, racks or eggs); serving/batch-based recipes
   use `scale: yield` in frontmatter. The UI asks for the desired anchor amount and
   derives the multiplier. `[scale=false]` keeps exceptional quantities fixed.
+- Portioned yields can express count and unit weight in one field, for example
+  `yield: 4 dough balls [each=~250 g]` or
+  `yield: 4 rolls [each=100 g +/- 2 g]`. Julia scales ingredients from the target
+  total (`count × each`), while annotations marked `[scale=count]` follow the
+  requested piece count. `~` means approximate; `+/-` and `±` declare a per-piece
+  tolerance without changing the central scaling target.
 - **Times and oven temperatures do not scale** (they aren't linear). Timers `~{}`
   are explicitly non-scaling.
 - The cookbook unit system defaults to `international` in `.julia`; recipes can
@@ -470,6 +476,12 @@ attach additions, quantity overrides, omissions, and replacement instructions to
 one step. Selecting a variation should update that step, scaling, shopping lists,
 and the cooking event while leaving the base recipe intact. The exact authoring
 syntax and conflict rules remain open.
+
+Preparation choices are the implemented first slice of this design. Consecutive
+steps carrying `[choice=name, option=value]` share one displayed step, and
+`default=true` selects the build-time default. Mutually exclusive branches must
+produce the same output contract; the selected branch controls Cook Mode and
+shopping ingredients.
 
 ### Feasts
 

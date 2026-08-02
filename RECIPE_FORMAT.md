@@ -58,6 +58,28 @@ Do something with a descriptive component name.
 The filename becomes the recipe slug: `croque_monsieur.md` becomes
 `croque-monsieur`.
 
+### Compound yields
+
+Portioned recipes can describe count and unit weight in the single `yield`
+field:
+
+```yaml
+yield: 4 dough balls [each=250 g]
+yield: 4 dough balls [each=~250 g]
+yield: 4 dough balls [each=250 g +/- 2 g]
+yield: 4 dough balls [each=250 g ± 2 g]
+```
+
+The plain value is a target, `~` marks an approximate target, and `+/-` or `±`
+declares a per-piece tolerance. Scaling uses `count × each` as the target batch
+mass. Mark count-bound outputs and later references with `[scale=count]` so their
+displayed quantity follows the requested piece count rather than batch mass:
+
+```markdown
+Divide the dough to produce =>dough balls{4%balls}[scale=count].
+Refrigerate ^dough balls{4%balls}[scale=count] overnight.
+```
+
 ## Common annotation grammar
 
 Most inline annotations use this shape:
@@ -139,9 +161,40 @@ An intermediate input must match an output from an earlier step in the same
 recipe. Julia rejects missing inputs and duplicate output names. Intermediate
 inputs display the step that produced them and never enter shopping lists.
 
+Leave an intermediate product's quantity block empty when a useful amount cannot
+or need not be stated:
+
+```markdown
+Chop ^cooked shrimp tails{} to produce =>chopped shrimp tails{}.
+```
+
+Unlike an empty external ingredient, which displays as “as needed,” an empty
+step-product quantity displays no measure.
+
 Use step products for meaningful handoffs, not every change of state. Custard,
 dough, separated yolks, and prepared sauce are useful products; “warm pan” or
 “stirred mixture” usually are not.
+
+## Alternative preparation steps
+
+Consecutive steps with the same `choice` attribute occupy one displayed step.
+Each branch needs a unique `option`; one branch may be marked as the default:
+
+```markdown
+== step prepare yeast [choice=yeast, option=instant, default=true] ==
+Mix @instant yeast{0.4%g} with @water{390%g} to produce
+=>yeast water{390%g}.
+
+== step prepare yeast [choice=yeast, option=active-dry] ==
+Bloom @active dry yeast{0.5%g} in @warm water{30%g} for
+~bloom{5-10%minutes}. Add @cool water{360%g} to produce
+=>yeast water{390%g}.
+```
+
+All options must produce the same named outputs so later common steps have one
+stable contract. Julia displays an option selector and includes only the active
+branch's ingredients, instructions, timers, and parameters in Cook Mode and
+shopping views. Feast documents use the default branch.
 
 ### Recipe dependencies: `@recipe`
 
@@ -211,4 +264,36 @@ Read an [external source](https://example.com).
 This word is *emphasized*.
 ```
 
+Ordered and unordered lists are also supported in recipe introductions and
+steps. Wrapped continuation lines remain part of the preceding item:
+
+```markdown
+1. First reason.
+2. Second reason wraps
+   onto another line.
+
+- One note.
+- Another note.
+```
+
 Julia supports this focused Markdown subset rather than arbitrary CommonMark.
+
+## YouTube videos
+
+Embed a responsive YouTube video in introductory prose or a recipe step with its
+11-character video ID:
+
+```markdown
+!youtube{LysF3BGtXt4}
+```
+
+Video annotations accept optional attributes:
+
+```markdown
+!youtube{LysF3BGtXt4}[start=1m30s, end=3m, title=Prime rib technique]
+!youtube{LysF3BGtXt4}[autoplay=false, mute=true, loop=true, controls=false, captions=true]
+```
+
+`start` and `end` accept seconds or durations such as `1m30s`. Boolean options
+accept `true` or `false`. Embeds use YouTube's privacy-enhanced domain and load
+lazily. Raw HTML, including manually written iframes, remains escaped.

@@ -3,7 +3,7 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 import json
 
-from julia_cookbook.builder import build
+from julia_cookbook.builder import _search_key, build
 
 
 ROOT = Path(__file__).parents[1]
@@ -11,6 +11,10 @@ RECIPES = ROOT / "tests" / "fixtures" / "recipes"
 
 
 class BuilderTests(TestCase):
+    def test_search_key_is_case_and_diacritic_insensitive(self) -> None:
+        self.assertEqual(_search_key("Crème Brûlée"), "creme brulee")
+        self.assertEqual(_search_key("CRÈME"), "creme")
+
     def test_builds_static_site(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)
@@ -82,3 +86,20 @@ class BuilderTests(TestCase):
             self.assertIn('href="#step-2">From step 2, mix</a>', product_html)
             self.assertIn('<span class="input-origin">(from step 1)</span>', product_html)
             self.assertIn('<span class="input-origin">(from step 2)</span>', product_html)
+            self.assertIn('<span class="measure"></span> <span>custard</span>', product_html)
+            self.assertNotIn('<span class="measure" data-quantity="" data-unit="">as needed</span> <span>custard</span>', product_html)
+            choice_html = (output / "recipes" / "choice.html").read_text(encoding="utf-8")
+            self.assertIn('data-choice-step="yeast"', choice_html)
+            self.assertIn('data-choice-panel="instant"', choice_html)
+            self.assertIn('data-choice-panel="fresh" hidden', choice_html)
+            choice_payload = next(recipe for recipe in payloads if recipe["id"] == "choice")
+            choice_items = [item for item in choice_payload["shoppingIngredients"] if item.get("choice")]
+            self.assertEqual(
+                [(item["name"], item["option"], item["default"]) for item in choice_items],
+                [("instant yeast", "instant", True), ("fresh yeast", "fresh", False)],
+            )
+            compound_html = (output / "recipes" / "compound-yield.html").read_text(encoding="utf-8")
+            self.assertIn("data-compound-yield", compound_html)
+            self.assertIn('data-original-count="4"', compound_html)
+            self.assertIn('data-original-each="100"', compound_html)
+            self.assertIn('data-scale-mode="count"', compound_html)

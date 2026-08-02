@@ -99,3 +99,67 @@ Whisk ^egg yolks{5} with @cream{2%cups} to produce =>custard{}.
             self.assertEqual([item.name for item in recipe.steps[1].outputs], ["custard"])
             self.assertIn('data-kind="output"', recipe.steps[0].html)
             self.assertIn('data-kind="input"', recipe.steps[1].html)
+
+    def test_parses_step_choice_attributes(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "dough.md"
+            path.write_text("""---
+title: Dough
+---
+== step prepare yeast [choice=yeast, option=instant, default=true] ==
+Mix @instant yeast{1%g} to produce =>yeast water{}.
+""", encoding="utf-8")
+
+            step = parse_recipe(path).steps[0]
+
+            self.assertEqual(step.title, "prepare yeast")
+            self.assertEqual(step.attributes, {"choice": "yeast", "option": "instant", "default": "true"})
+
+    def test_renders_ordered_and_unordered_lists(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "lists.md"
+            path.write_text("""---
+title: Lists
+---
+
+1. First reason.
+2. Second reason wraps
+   onto another line.
+
+== step serve ==
+- Add @salt{}.
+- Add pepper.
+""", encoding="utf-8")
+
+            recipe = parse_recipe(path)
+
+            self.assertIn("<ol><li>First reason.</li><li>Second reason wraps onto another line.</li></ol>", recipe.blurb_html)
+            self.assertIn("<ul><li>Add", recipe.steps[0].html)
+            self.assertEqual(recipe.steps[0].ingredients[0].name, "salt")
+
+    def test_renders_safe_youtube_embed_with_options(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "video.md"
+            path.write_text("""---
+title: Video
+---
+
+!youtube{LysF3BGtXt4}[start=1m30s, end=3m, autoplay=false, mute=true, loop=true, controls=false, captions=true, title=Prime rib technique]
+
+== step serve ==
+Serve.
+""", encoding="utf-8")
+
+            html = parse_recipe(path).blurb_html
+            self.assertIn('class="video-embed"', html)
+            self.assertIn("youtube-nocookie.com/embed/LysF3BGtXt4", html)
+            self.assertIn("start=90&amp;end=180&amp;autoplay=0&amp;mute=1&amp;controls=0", html)
+            self.assertIn("loop=1&amp;playlist=LysF3BGtXt4&amp;cc_load_policy=1", html)
+            self.assertIn('title="Prime rib technique"', html)
+
+    def test_rejects_unknown_youtube_options(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "video.md"
+            path.write_text("---\ntitle: Video\n---\n!youtube{LysF3BGtXt4}[color=red]\n== step ==\nServe.\n", encoding="utf-8")
+            with self.assertRaisesRegex(RecipeSyntaxError, "unknown YouTube option 'color'"):
+                parse_recipe(path)
