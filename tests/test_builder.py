@@ -92,6 +92,9 @@ class BuilderTests(TestCase):
             self.assertIn('data-choice-step="yeast"', choice_html)
             self.assertIn('data-choice-panel="instant"', choice_html)
             self.assertIn('data-choice-panel="fresh" hidden', choice_html)
+            self.assertEqual(choice_html.count('class="choice-dependencies"'), 2)
+            self.assertIn('id="choice-instant-embedded-step-1-1"', choice_html)
+            self.assertIn('id="choice-fresh-embedded-step-1-1"', choice_html)
             choice_payload = next(recipe for recipe in payloads if recipe["id"] == "choice")
             choice_items = [item for item in choice_payload["shoppingIngredients"] if item.get("choice")]
             self.assertEqual(

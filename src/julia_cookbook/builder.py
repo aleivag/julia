@@ -178,6 +178,7 @@ def _embedded_recipe_steps(
     scale: float,
     number_prefix: tuple[int, ...],
     dependency_path: tuple[str, ...],
+    anchor_prefix: str = "",
 ) -> str:
     rendered_steps = []
     product_sources: dict[str, tuple[str, str]] = {}
@@ -190,6 +191,7 @@ def _embedded_recipe_steps(
                 _dependency_step(
                     step.subrecipes[0], recipes, scale, number_parts,
                     (*dependency_path, step.id), dependency_path,
+                    anchor_prefix=anchor_prefix,
                 )
             )
         else:
@@ -210,7 +212,7 @@ def _embedded_recipe_steps(
                 source_label = f"From step {source_number}" + (f", {source_title}" if source_title else "")
                 check_key = f"{step_key}:input:{input_index}"
                 input_rows.append(
-                    f'<li><label><input type="checkbox" data-check="dependency-input" data-key="{escape(check_key)}" data-embedded-check="{escape(check_key)}">{_product_measure(item, quantity)}<span>{escape(item.name)}</span><small><a href="#{_embedded_anchor(tuple(int(part) for part in source_number.split('.')))}">{escape(source_label)}</a></small></label></li>'
+                    f'<li><label><input type="checkbox" data-check="dependency-input" data-key="{escape(check_key)}" data-embedded-check="{escape(check_key)}">{_product_measure(item, quantity)}<span>{escape(item.name)}</span><small><a href="#{escape(anchor_prefix)}{_embedded_anchor(tuple(int(part) for part in source_number.split('.')))}">{escape(source_label)}</a></small></label></li>'
                 )
             output_rows = [
                 f'<li>{_product_measure(item, scaled_quantity(item.quantity, scale))}<span>{escape(item.name)}</span></li>'
@@ -223,10 +225,10 @@ def _embedded_recipe_steps(
             inputs = f'<div class="step-products"><p>From earlier steps</p><ul>{"".join(input_rows)}</ul></div>' if input_rows else ""
             outputs = f'<div class="step-products outputs"><p>Produces</p><ul>{"".join(output_rows)}</ul></div>' if output_rows else ""
             nested = "".join(
-                _dependency_step(item, recipes, scale, (*number_parts, child_index), (*dependency_path, step.id, f"dependency-{child_index}"), dependency_path)
+                _dependency_step(item, recipes, scale, (*number_parts, child_index), (*dependency_path, step.id, f"dependency-{child_index}"), dependency_path, anchor_prefix=anchor_prefix)
                 for child_index, item in enumerate(step.subrecipes, start=1)
             )
-            rendered_steps.append(f'''<article class="recipe-step embedded-tree-step" id="{_embedded_anchor(number_parts)}" data-embedded-step>
+            rendered_steps.append(f'''<article class="recipe-step embedded-tree-step" id="{escape(anchor_prefix)}{_embedded_anchor(number_parts)}" data-embedded-step>
               <aside>{heading}<ul class="ingredient-list">{"".join(ingredient_rows)}</ul>{inputs}{outputs}</aside>
               <section class="instructions"><div class="step-heading"><span class="step-number">{number}</span><label><input type="checkbox" data-check="dependency-step" data-key="{escape(step_key)}" data-step-completion><span>Step complete</span></label></div>{instructions}</section>
             </article>{nested}''')
@@ -243,6 +245,7 @@ def _dependency_step(
     step_path: tuple[str, ...],
     trail: tuple[str, ...],
     root_step_id: str = "",
+    anchor_prefix: str = "",
 ) -> str:
     dependency = recipes[reference.name]
     if dependency.id in trail:
@@ -253,11 +256,11 @@ def _dependency_step(
     requested_display = " ".join(part for part in (requested, reference.unit) if part) or "as needed"
     number = _step_number(number_parts)
     step_key = "/".join((*step_path, dependency.id))
-    anchor = root_step_id or _embedded_anchor(number_parts)
+    anchor = root_step_id or f"{anchor_prefix}{_embedded_anchor(number_parts)}"
     check_kind = "step" if root_step_id else "dependency-step"
     data_step = f' data-step="{escape(root_step_id)}"' if root_step_id else ""
     children = _embedded_recipe_steps(
-        dependency, recipes, scale, number_parts, (*step_path, dependency.id)
+        dependency, recipes, scale, number_parts, (*step_path, dependency.id), anchor_prefix
     )
     return f'''<details class="recipe-step dependency-step" id="{escape(anchor)}"{data_step} data-dependency-node>
       <summary class="dependency-step-summary"><aside><p class="component">Included recipe</p><span class="measure" data-quantity="{escape(requested)}" data-unit="{escape(reference.unit)}">{escape(requested_display)}</span></aside><section class="instructions"><div class="step-heading"><span class="step-number">{number}</span><label><input type="checkbox" data-check="{check_kind}" data-key="{escape(root_step_id or step_key)}" data-step-completion><span>Step complete</span></label></div><p>Prepare <span class="inline-measure" data-quantity="{escape(requested)}" data-unit="{escape(reference.unit)}">{escape(requested_display)}</span> <strong>{escape(dependency.title)}</strong>.</p></section></summary>
@@ -280,7 +283,7 @@ def _step_groups(recipe: Recipe) -> list[list[Any]]:
     return groups
 
 
-def _choice_step(group: list[Any], display_number: int) -> str:
+def _choice_step(group: list[Any], display_number: int, recipes: dict[str, Recipe], recipe_id: str) -> str:
     choice = group[0].attributes["choice"]
     default = next((step for step in group if step.attributes.get("default") == "true"), group[0])
     controls = []
@@ -303,9 +306,19 @@ def _choice_step(group: list[Any], display_number: int) -> str:
             for item in step.outputs
         )
         instructions = _scaled_embedded_html(step.html, 1.0, step_key)
+        dependencies = "".join(
+            _dependency_step(
+                item, recipes, 1.0, (display_number, child_index),
+                (recipe_id, step.id, f"choice-{option}", f"dependency-{child_index}"),
+                (recipe_id,),
+                anchor_prefix=f"choice-{option}-",
+            )
+            for child_index, item in enumerate(step.subrecipes, start=1)
+        )
         panels.append(f'''<section class="choice-option" data-choice-panel="{escape(option)}"{"" if selected else " hidden"}>
           <aside><ul class="ingredient-list">{"".join(ingredients)}</ul>{f'<div class="step-products outputs"><p>Produces</p><ul>{outputs}</ul></div>' if outputs else ''}</aside>
           <div class="instructions">{instructions}</div>
+          {f'<div class="choice-dependencies">{dependencies}</div>' if dependencies else ''}
         </section>''')
     title = group[0].title or choice.replace("-", " ")
     return f'''<article class="recipe-step choice-step" id="step-{display_number}" data-step="choice-{escape(choice)}" data-choice-step="{escape(choice)}" data-choice-default="{escape(default.attributes['option'])}">
@@ -402,7 +415,7 @@ def _recipe_page(recipe: Recipe, recipes: dict[str, Recipe], site: dict[str, Any
     for index, group in enumerate(step_groups):
         step = group[0]
         if step.attributes.get("choice"):
-            steps.append(_choice_step(group, index + 1))
+            steps.append(_choice_step(group, index + 1, recipes, recipe.id))
             for item in step.outputs:
                 product_sources[item.name.casefold()] = (index + 1, step.title)
             continue
