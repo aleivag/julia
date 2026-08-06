@@ -103,3 +103,6 @@ class BuilderTests(TestCase):
             self.assertIn('data-original-count="4"', compound_html)
             self.assertIn('data-original-each="100"', compound_html)
             self.assertIn('data-scale-mode="count"', compound_html)
+            self.assertIn('data-bakers-formula', compound_html)
+            self.assertIn('data-original-flour="240"', compound_html)
+            self.assertIn('<option value="70">70%</option>', compound_html)

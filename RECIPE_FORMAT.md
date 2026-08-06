@@ -80,6 +80,26 @@ Divide the dough to produce =>dough balls{4%balls}[scale=count].
 Refrigerate ^dough balls{4%balls}[scale=count] overnight.
 ```
 
+### Baker's formulas with portioned yields
+
+A compound yield, a base flour, and one selectable baker's-percentage ingredient
+create a formula-aware scaling panel:
+
+```markdown
+---
+yield: 4 dough balls [each=~250 g]
+---
+
+Measure @water{65%bakers}[ratio_of=tipo 00 flour, options=65|70|75].
+Mix with @tipo 00 flour{600%g}[base=true, scale=true] and @salt{17%g}.
+```
+
+The panel coordinates total flour, hydration, portion count, and portion weight.
+Changing flour or hydration keeps the portion weight and reports the number of
+full portions plus any extra dough. Changing count or portion weight keeps those
+two yield targets and calculates the required flour. Other same-unit ingredients
+and baker's percentages are included in the total dough calculation.
+
 ## Common annotation grammar
 
 Most inline annotations use this shape:
@@ -101,6 +121,13 @@ optional:
 Names may contain spaces, numbers, punctuation, hyphens, and Unicode. A name
 ends at its first `{`. Each annotation's `{}`, optional `()`, and optional `[]`
 must currently open and close on the same physical line.
+
+### Unit conversion
+
+The International/Imperial control converts temperatures and structured
+culinary quantities. Supported ingredient conversions include `oz`/`lb` ↔
+`g`/`kg` and `tsp`/`tbsp`/`cups`/`fl oz`/`qt` ↔ `ml`/`L`. Unknown units and
+free-form compound quantities remain as authored.
 
 ## Markers
 

@@ -368,6 +368,35 @@ def _recipe_page(recipe: Recipe, recipes: dict[str, Recipe], site: dict[str, Any
     ratio_base = next((item for item in all_ingredients if item.attributes.get("base") == "true"), None)
     if ratio_base is None:
         ratio_base = next((item for item in all_ingredients if item.unit.lower() in {"g", "kg", "oz", "lb"}), None)
+    bakers_formula = None
+    hydration_items = [item for item in all_ingredients if item.unit.lower() == "bakers" and item.attributes.get("options")]
+    if yield_spec and yield_spec.compound and ratio_base and yield_spec.unit.lower() == ratio_base.unit.lower() and len(hydration_items) == 1:
+        base_amount = _numeric_quantity(ratio_base.quantity)
+        hydration = hydration_items[0]
+        hydration_value = _numeric_quantity(hydration.quantity)
+        options = [_numeric_quantity(value) for value in hydration.attributes["options"].split("|")]
+        if not base_amount or not hydration_value or any(value is None or value <= 0 for value in options):
+            raise ValueError(f"{recipe.path}: baker formula requires positive numeric flour and hydration options")
+        other_ratio = 0.0
+        for item in all_ingredients:
+            if item is ratio_base or item is hydration:
+                continue
+            amount = _numeric_quantity(item.quantity)
+            if amount is None:
+                continue
+            if item.unit.lower() == "bakers":
+                other_ratio += amount
+            elif item.unit.lower() == ratio_base.unit.lower():
+                other_ratio += amount / base_amount * 100
+        bakers_formula = {
+            "base": ratio_base,
+            "base_amount": base_amount,
+            "hydration": hydration,
+            "hydration_value": hydration_value,
+            "options": options,
+            "other_ratio": other_ratio,
+            "total": base_amount * (1 + hydration_value / 100 + other_ratio / 100),
+        }
     product_sources: dict[str, tuple[int, str]] = {}
     step_groups = _step_groups(recipe)
     for index, group in enumerate(step_groups):
@@ -389,6 +418,8 @@ def _recipe_page(recipe: Recipe, recipes: dict[str, Recipe], site: dict[str, Any
                 measure_attrs += ' data-scale-item="false"'
             if is_ratio and item_ratio_base:
                 measure_attrs += f' data-ratio="{escape(item.quantity)}" data-base-quantity="{escape(item_ratio_base.quantity)}" data-base-unit="{escape(item_ratio_base.unit)}"'
+                if item.attributes.get("options"):
+                    measure_attrs += f' data-ratio-options="{escape(item.attributes["options"])}"'
             ingredient_rows.append(f'''<li><label><input type="checkbox" data-check="ingredient" data-key="{step.id}:{i}" data-ingredient-index="{i}"><span class="measure" {measure_attrs}>{escape(display)}</span> <span>{escape(item.name)}</span>{f'<small>{escape(item.note)}</small>' if item.note else ''}</label><label class="actual-used">Used <input type="number" min="0" step="any" inputmode="decimal" data-actual="{step.id}:{i}" data-ingredient-name="{escape(item.name)}"{ratio_attrs}> <span>{escape(actual_unit)}</span></label><p class="ratio-warning" data-ratio-warning="{step.id}:{i}"></p></li>''')
         ingredients = "".join(ingredient_rows)
         input_rows = []
@@ -445,7 +476,16 @@ def _recipe_page(recipe: Recipe, recipes: dict[str, Recipe], site: dict[str, Any
         precision = "~" if yield_spec.approximate else ""
         tolerance = f' ± {yield_spec.tolerance:g} {escape(yield_spec.unit)}' if yield_spec.tolerance is not None else ""
         compound_control = f'''<div class="compound-yield" data-compound-yield data-original-count="{count}" data-original-each="{each}" data-each-unit="{escape(yield_spec.unit)}"><label><span>Count</span><span class="compound-field"><input type="number" min="1" step="1" value="{count}" data-yield-count><span>{escape(yield_spec.item)}</span></span></label><span class="compound-times">×</span><label><span>Each</span><span class="compound-field"><input type="number" min="0.01" step="any" value="{each}" data-yield-each><span>{escape(yield_spec.unit)}</span></span></label><div class="compound-target"><span>Target</span><strong>= <output data-yield-total>{yield_spec.total:g}</output> {escape(yield_spec.unit)}</strong></div><small>{precision}{each} {escape(yield_spec.unit)} each{tolerance}</small></div>'''
-    scale_panel = f'''<details class="scale-panel"><summary><span>Scale &amp; units</span><strong data-scale-summary>Original</strong></summary><div class="scale-panel-body">{compound_control}{anchor_control}<label class="quick-scale"><span>Quick scale</span><select data-scale><option value="0.5">Half</option><option value="1" selected>Original</option><option value="1.5">1.5x</option><option value="2">Double</option><option value="3">Triple</option><option value="custom" hidden>Custom</option></select></label><fieldset class="unit-system"><legend>Temperature</legend><div role="group" aria-label="Temperature units"><button type="button" data-unit-system="international">International</button><button type="button" data-unit-system="imperial">Imperial</button></div></fieldset></div></details>'''
+    formula_control = ""
+    if bakers_formula:
+        option_html = "".join(
+            f'<option value="{value:g}"{" selected" if value == bakers_formula["hydration_value"] else ""}>{value:g}%</option>'
+            for value in bakers_formula["options"]
+        )
+        difference = bakers_formula["total"] - yield_spec.total
+        initial_result = "No extra dough" if abs(difference) < 0.05 else f'{difference:g} {yield_spec.unit} extra' if difference > 0 else f'{abs(difference):g} {yield_spec.unit} short'
+        formula_control = f'''<div class="bakers-formula" data-bakers-formula data-original-flour="{bakers_formula["base_amount"]:g}" data-flour-unit="{escape(bakers_formula["base"].unit)}" data-original-hydration="{bakers_formula["hydration_value"]:g}" data-other-ratio="{bakers_formula["other_ratio"]:g}"><label><span>Total flour</span><span class="compound-field"><input type="number" min="0.01" step="any" value="{bakers_formula["base_amount"]:g}" data-formula-flour><span>{escape(bakers_formula["base"].unit)}</span></span></label><label><span>Hydration</span><select data-formula-hydration>{option_html}</select></label><div class="formula-yield"><span>Available dough</span><strong><output data-formula-total>{bakers_formula["total"]:g}</output> {escape(yield_spec.unit)}</strong><small data-formula-result>{escape(initial_result)}</small></div></div>'''
+    scale_panel = f'''<details class="scale-panel"><summary><span>Scale &amp; units</span><strong data-scale-summary>Original</strong></summary><div class="scale-panel-body">{formula_control}{compound_control}{anchor_control}<label class="quick-scale"><span>Quick scale</span><select data-scale><option value="0.5">Half</option><option value="1" selected>Original</option><option value="1.5">1.5x</option><option value="2">Double</option><option value="3">Triple</option><option value="custom" hidden>Custom</option></select></label><fieldset class="unit-system"><legend>Units</legend><div role="group" aria-label="Measurement units"><button type="button" data-unit-system="international">International</button><button type="button" data-unit-system="imperial">Imperial</button></div></fieldset></div></details>'''
     content = f'''<header class="recipe-hero"><div><p class="eyebrow">Recipe</p><h1>{escape(recipe.title)}</h1><p class="recipe-yield">Makes <strong>{yield_text}</strong></p>{source}<div class="tag-list">{tags}</div></div>
       {relationship_html}<div class="recipe-actions"><button class="primary" data-action="start-cook">Make this recipe</button><a class="source-button" href="../sources/{recipe.id}.html">Show source</a></div></header>
       <div class="progress-wrap" hidden data-progress-wrap><div><span data-progress-text>0 of {len(step_groups)} steps</span><button class="text-button" data-action="finish-cook">Finish cook</button></div><progress max="{len(step_groups)}" value="0" data-progress></progress></div>

@@ -30,6 +30,34 @@
     if (found) return `${whole ? whole + " " : ""}${found[1]}`;
     return Number(value.toFixed(2)).toString();
   };
+  const decimal = (value, places = 2) => Number(value.toFixed(places)).toString();
+  const normalizedUnit = unit => String(unit || "").trim().toLowerCase().replace(/\.$/, "");
+  const convertedMeasure = (value, unit, system) => {
+    const normalized = normalizedUnit(unit);
+    if (!Number.isFinite(value)) return null;
+    if (system === "international") {
+      if (["oz", "ounce", "ounces"].includes(normalized)) return `${decimal(value * 28.3495, value * 28.3495 >= 10 ? 0 : 1)} g`;
+      if (["lb", "lbs", "pound", "pounds"].includes(normalized)) {
+        const grams = value * 453.592;
+        return grams >= 1000 ? `${decimal(grams / 1000)} kg` : `${decimal(grams, 0)} g`;
+      }
+      if (["tsp", "teaspoon", "teaspoons"].includes(normalized)) return `${decimal(value * 5, 1)} ml`;
+      if (["tbsp", "tablespoon", "tablespoons"].includes(normalized)) return `${decimal(value * 15, 1)} ml`;
+      if (["cup", "cups"].includes(normalized)) return `${decimal(value * 240, 0)} ml`;
+      if (["fl oz", "fluid ounce", "fluid ounces"].includes(normalized)) return `${decimal(value * 30, 0)} ml`;
+      if (["qt", "quart", "quarts"].includes(normalized)) return `${decimal(value * .946353)} L`;
+      if (["gal", "gallon", "gallons"].includes(normalized)) return `${decimal(value * 3.78541)} L`;
+    } else {
+      if (["g", "gram", "grams"].includes(normalized)) {
+        const ounces = value / 28.3495;
+        return ounces >= 16 ? `${decimal(ounces / 16)} lb` : `${decimal(ounces)} oz`;
+      }
+      if (["kg", "kilogram", "kilograms"].includes(normalized)) return `${decimal(value * 2.20462)} lb`;
+      if (["ml", "milliliter", "milliliters", "millilitre", "millilitres"].includes(normalized)) return `${decimal(value / 30)} fl oz`;
+      if (["l", "liter", "liters", "litre", "litres"].includes(normalized)) return `${decimal(value / .946353)} qt`;
+    }
+    return null;
+  };
   const scaleQuantity = (raw, scale) => raw.split("+").map(term => {
     const match = term.trim().match(/^(.+?)(?:\s+([A-Za-z]+))?$/); if (!match) return term;
     const number = fraction(match[1]); return number === null ? term.trim() : `${displayNumber(number * scale)}${match[2] ? " " + match[2] : ""}`;
@@ -58,8 +86,17 @@
     const yieldCount = compoundYield?.querySelector("[data-yield-count]");
     const yieldEach = compoundYield?.querySelector("[data-yield-each]");
     const yieldTotal = compoundYield?.querySelector("[data-yield-total]");
+    const bakersFormula = document.querySelector("[data-bakers-formula]");
+    const formulaFlour = bakersFormula?.querySelector("[data-formula-flour]");
+    const formulaHydration = bakersFormula?.querySelector("[data-formula-hydration]");
+    const formulaTotal = bakersFormula?.querySelector("[data-formula-total]");
+    const formulaResult = bakersFormula?.querySelector("[data-formula-result]");
     if (active?.yieldCount && yieldCount) yieldCount.value = active.yieldCount;
     if (active?.yieldEach && yieldEach) yieldEach.value = active.yieldEach;
+    if (bakersFormula) {
+      formulaFlour.value = Number((Number(bakersFormula.dataset.originalFlour) * scale).toFixed(2));
+      formulaHydration.value = String(active?.hydration || store.preferences?.[recipe.id]?.hydration || bakersFormula.dataset.originalHydration);
+    }
     const scaleSummary = document.querySelector("[data-scale-summary]");
     let unitSystem = store.preferences?.[recipe.id]?.units || payload.units || "international";
     if (!scaleSelect.querySelector(`option[value="${scale}"]`)) scaleSelect.value = "custom";
@@ -68,7 +105,8 @@
     const updateScaleSummary = () => {
       const anchors = anchorInputs.map(input => `${input.value}${input.dataset.anchorUnit ? " " + input.dataset.anchorUnit : ""} ${input.dataset.anchorLabel}`).join(" · ");
       const compound = compoundYield ? `${yieldCount.value} × ${yieldEach.value} ${compoundYield.dataset.eachUnit}` : "";
-      scaleSummary.textContent = `${compound || anchors || (scale === 1 ? "Original" : `${Number(scale.toFixed(2))}x`)} · ${unitSystem === "imperial" ? "Imperial" : "International"}`;
+      const formula = bakersFormula ? `${formulaFlour.value} ${bakersFormula.dataset.flourUnit} flour · ${formulaHydration.value}% hydration` : "";
+      scaleSummary.textContent = `${[compound, formula].filter(Boolean).join(" · ") || anchors || (scale === 1 ? "Original" : `${Number(scale.toFixed(2))}x`)} · ${unitSystem === "imperial" ? "Imperial" : "International"}`;
     };
     updateScaleSummary();
     const displayTemperature = (quantity, sourceUnit) => {
@@ -78,6 +116,11 @@
       const rounded = Math.abs(converted - Math.round(converted)) < 0.05 ? Math.round(converted) : Number(converted.toFixed(1));
       return `${rounded}°${unitSystem === "international" ? "C" : "F"}`;
     };
+    const displayMeasure = (quantity, unit, itemScale = 1) => {
+      const numeric = fraction(quantity);
+      const converted = numeric === null ? null : convertedMeasure(numeric * itemScale, unit, unitSystem);
+      return converted || `${scaleQuantity(quantity, itemScale)}${unit ? " " + unit : ""}`;
+    };
     const applyUnits = () => {
       document.querySelectorAll('.annotation.parameter[data-name="temp"]').forEach(element => element.textContent = displayTemperature(element.dataset.quantity, element.dataset.unit));
       document.querySelectorAll("[data-unit-system]").forEach(button => { const active = button.dataset.unitSystem === unitSystem; button.classList.toggle("active", active); button.setAttribute("aria-pressed", String(active)); });
@@ -85,27 +128,58 @@
     };
     document.querySelectorAll("[data-unit-system]").forEach(button => button.addEventListener("click", () => {
       unitSystem = button.dataset.unitSystem;
-      store.preferences ||= {}; store.preferences[recipe.id] = { ...(store.preferences[recipe.id] || {}), units: unitSystem }; saveStore(); applyUnits();
+      store.preferences ||= {}; store.preferences[recipe.id] = { ...(store.preferences[recipe.id] || {}), units: unitSystem }; saveStore(); applyUnits(); applyScale(); ratioMeasures();
     }));
     applyUnits();
     const countScale = () => compoundYield ? Number(yieldCount.value) / Number(compoundYield.dataset.originalCount) : scale;
-    const applyScale = () => {
-      document.querySelectorAll(".measure[data-quantity]").forEach(el => { const quantity = el.dataset.quantity, itemScale = el.dataset.scaleMode === "count" ? countScale() : el.dataset.scaleItem === "false" ? 1 : scale; el.textContent = quantity ? `${scaleQuantity(quantity, itemScale)}${el.dataset.unit ? " " + el.dataset.unit : ""}` : "as needed"; });
-      document.querySelectorAll(".inline-measure[data-quantity]").forEach(el => { const itemScale = el.dataset.scaleMode === "count" ? countScale() : el.dataset.scaleItem === "false" ? 1 : scale; el.textContent = `${scaleQuantity(el.dataset.quantity, itemScale)}${el.dataset.unit ? " " + el.dataset.unit : ""}`; });
-      if (yieldTotal) yieldTotal.textContent = displayNumber(Number(yieldCount.value) * Number(yieldEach.value));
+    const formulaFactor = () => bakersFormula ? 1 + Number(formulaHydration.value) / 100 + Number(bakersFormula.dataset.otherRatio) / 100 : 0;
+    const renderFormula = () => {
+      if (!bakersFormula) return;
+      const total = Number(formulaFlour.value) * formulaFactor();
+      const target = Number(yieldCount.value) * Number(yieldEach.value);
+      const difference = total - target;
+      formulaTotal.textContent = displayNumber(total);
+      formulaResult.textContent = Math.abs(difference) < .05 ? "No extra dough" : difference > 0 ? `${displayNumber(difference)} ${compoundYield.dataset.eachUnit} extra` : `${displayNumber(Math.abs(difference))} ${compoundYield.dataset.eachUnit} short`;
     };
-    const ratioMeasures = () => document.querySelectorAll("[data-ratio]").forEach(el => { const base = fraction(el.dataset.baseQuantity), ratio = fraction(el.dataset.ratio); el.textContent = base !== null && ratio !== null ? `${displayNumber(base * ratio / 100 * scale)} ${el.dataset.baseUnit} (${ratio}%)` : `${el.dataset.ratio}%`; });
+    const applyScale = () => {
+      document.querySelectorAll(".measure[data-quantity]").forEach(el => { const quantity = el.dataset.quantity, itemScale = el.dataset.scaleMode === "count" ? countScale() : el.dataset.scaleItem === "false" ? 1 : scale; el.textContent = quantity ? displayMeasure(quantity, el.dataset.unit, itemScale) : "as needed"; });
+      document.querySelectorAll(".inline-measure[data-quantity]").forEach(el => { const itemScale = el.dataset.scaleMode === "count" ? countScale() : el.dataset.scaleItem === "false" ? 1 : scale; el.textContent = displayMeasure(el.dataset.quantity, el.dataset.unit, itemScale); });
+      if (yieldTotal) yieldTotal.textContent = displayNumber(Number(yieldCount.value) * Number(yieldEach.value));
+      renderFormula();
+    };
+    const ratioMeasures = () => document.querySelectorAll("[data-ratio]").forEach(el => {
+      if (el.dataset.ratioOptions && formulaHydration) el.dataset.ratio = formulaHydration.value;
+      const base = fraction(el.dataset.baseQuantity), ratio = fraction(el.dataset.ratio);
+      const text = base !== null && ratio !== null ? `${displayMeasure(String(base * ratio / 100), el.dataset.baseUnit, scale)} (${ratio}%)` : `${el.dataset.ratio}%`;
+      el.textContent = text;
+      const row = el.closest("li"), index = row?.querySelector("[data-ingredient-index]")?.dataset.ingredientIndex;
+      const step = el.closest("[data-step]");
+      if (index !== undefined) step?.querySelector(`.instructions .annotation.ingredient[data-ingredient-index="${index}"] .inline-measure`)?.replaceChildren(text);
+    });
     applyScale(); ratioMeasures();
-    const saveScale = () => { applyScale(); ratioMeasures(); updateScaleSummary(); if (store.active[recipe.id]) { store.active[recipe.id].scale = scale; if (compoundYield) { store.active[recipe.id].yieldCount = Number(yieldCount.value); store.active[recipe.id].yieldEach = Number(yieldEach.value); } saveStore(); } };
+    const saveScale = () => { applyScale(); ratioMeasures(); updateScaleSummary(); if (bakersFormula) { store.preferences ||= {}; store.preferences[recipe.id] = { ...(store.preferences[recipe.id] || {}), hydration: Number(formulaHydration.value) }; } if (store.active[recipe.id]) { store.active[recipe.id].scale = scale; if (compoundYield) { store.active[recipe.id].yieldCount = Number(yieldCount.value); store.active[recipe.id].yieldEach = Number(yieldEach.value); } if (bakersFormula) store.active[recipe.id].hydration = Number(formulaHydration.value); } saveStore(); };
     const updateAnchors = source => anchorInputs.forEach(input => { if (input !== source) input.value = scaledAnchorValue(input); });
-    scaleSelect.addEventListener("change", () => { if (scaleSelect.value === "custom") return; scale = Number(scaleSelect.value); if (compoundYield) { yieldCount.value = Number(compoundYield.dataset.originalCount) * scale; yieldEach.value = compoundYield.dataset.originalEach; } updateAnchors(null); saveScale(); });
+    const formulaFromTarget = () => {
+      const target = Number(yieldCount.value) * Number(yieldEach.value);
+      formulaFlour.value = Number((target / formulaFactor()).toFixed(2));
+      scale = Number(formulaFlour.value) / Number(bakersFormula.dataset.originalFlour);
+    };
+    const formulaFromFlour = () => {
+      scale = Number(formulaFlour.value) / Number(bakersFormula.dataset.originalFlour);
+      const available = Number(formulaFlour.value) * formulaFactor();
+      yieldCount.value = Math.max(1, Math.floor((available + .0001) / Number(yieldEach.value)));
+    };
+    scaleSelect.addEventListener("change", () => { if (scaleSelect.value === "custom") return; const selectedScale = Number(scaleSelect.value); if (compoundYield) { yieldCount.value = Number(compoundYield.dataset.originalCount) * selectedScale; yieldEach.value = compoundYield.dataset.originalEach; } if (bakersFormula) formulaFromTarget(); else scale = selectedScale; updateAnchors(null); saveScale(); });
     anchorInputs.forEach(anchorInput => anchorInput.addEventListener("input", () => { const desired = Number(anchorInput.value), original = Number(anchorInput.dataset.anchorOriginal); if (!(desired > 0 && original > 0)) return; scale = desired / original; updateAnchors(anchorInput); scaleSelect.value = scaleSelect.querySelector(`option[value="${scale}"]`) ? String(scale) : "custom"; saveScale(); }));
     [yieldCount, yieldEach].filter(Boolean).forEach(input => input.addEventListener("input", () => {
       const total = Number(yieldCount.value) * Number(yieldEach.value);
       const original = Number(compoundYield.dataset.originalCount) * Number(compoundYield.dataset.originalEach);
       if (!(total > 0 && original > 0)) return;
-      scale = total / original; scaleSelect.value = "custom"; saveScale();
+      if (bakersFormula) formulaFromTarget(); else scale = total / original;
+      scaleSelect.value = "custom"; saveScale();
     }));
+    formulaFlour?.addEventListener("input", () => { if (!(Number(formulaFlour.value) > 0)) return; formulaFromFlour(); scaleSelect.value = "custom"; saveScale(); });
+    formulaHydration?.addEventListener("change", () => { formulaFromFlour(); scaleSelect.value = "custom"; saveScale(); });
 
     document.querySelectorAll("[data-choice-step]").forEach(choiceStep => {
       const choice = choiceStep.dataset.choiceStep;

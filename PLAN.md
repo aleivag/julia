@@ -256,12 +256,16 @@ Renders (per step) as:
   total (`count × each`), while annotations marked `[scale=count]` follow the
   requested piece count. `~` means approximate; `+/-` and `±` declare a per-piece
   tolerance without changing the central scaling target.
+- A compound yield can be combined with a base flour and a selectable baker's
+  percentage such as `[options=65|70|75]`. The scaling panel then coordinates
+  flour, hydration, portion count, and portion weight, and reports surplus dough
+  when a flour-driven batch does not divide evenly.
 - **Times and oven temperatures do not scale** (they aren't linear). Timers `~{}`
   are explicitly non-scaling.
 - The cookbook unit system defaults to `international` in `.julia`; recipes can
   override it with `units: imperial` or `units: international` in frontmatter.
-  Readers can override either default in **Scale & units**. F/C temperature
-  conversion is the first implemented conversion family.
+  Readers can override either default in **Scale & units**. Conversion includes
+  temperatures plus structured culinary weights and volumes.
 - **Ratio-aware quantities** (e.g. baker's percentages). An ingredient can be
   defined relative to a base rather than as an absolute amount:
   ```
