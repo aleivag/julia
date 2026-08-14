@@ -8,6 +8,7 @@ from julia_cookbook.builder import _search_key, build
 
 ROOT = Path(__file__).parents[1]
 RECIPES = ROOT / "tests" / "fixtures" / "recipes"
+GUIDES = ROOT / "tests" / "fixtures" / "guides"
 
 
 class BuilderTests(TestCase):
@@ -19,6 +20,7 @@ class BuilderTests(TestCase):
         with TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "recipes").symlink_to(RECIPES)
+            (root / "guides").symlink_to(GUIDES)
             (root / ".julia").write_text('[site]\ntitle="Test"\noutput="site"\n[author]\nname="Cook"\ninstagram="@cook"\n', encoding="utf-8")
             output, recipes = build(root)
             self.assertGreaterEqual(len(recipes), 3)
@@ -27,7 +29,22 @@ class BuilderTests(TestCase):
             self.assertTrue((output / "assets" / "icon.svg").exists())
             self.assertTrue((output / "sw.js").exists())
             self.assertTrue((output / "sources" / "indoor-smoke-ribs.html").exists())
+            self.assertTrue((output / "guides" / "turkey.html").exists())
+            self.assertTrue((output / "guides" / "index.html").exists())
+            self.assertTrue((output / "feasts" / "index.html").exists())
+            guide_html = (output / "guides" / "turkey.html").read_text(encoding="utf-8")
+            self.assertIn('data-page="guide"', guide_html)
+            self.assertIn('data-guide-unit="international"', guide_html)
+            self.assertIn('<table>', guide_html)
+            self.assertIn('../recipes/indoor-smoke-ribs.html', guide_html)
+            index_html = (output / "index.html").read_text(encoding="utf-8")
+            guides_index = (output / "guides" / "index.html").read_text(encoding="utf-8")
+            self.assertNotIn('href="guides/turkey.html"', index_html)
+            self.assertIn('href="turkey.html"', guides_index)
+            self.assertIn('href="guides/index.html"', index_html)
+            self.assertIn('href="../guides/index.html" aria-current="page">Guides</a>', guide_html)
             html = (output / "recipes" / "indoor-smoke-ribs.html").read_text(encoding="utf-8")
+            self.assertIn('href="../index.html" aria-current="page">Recipes</a>', html)
             self.assertIn("Make this recipe", html)
             self.assertIn("Show source", html)
             self.assertIn("data-scale-anchor", html)
@@ -95,11 +112,15 @@ class BuilderTests(TestCase):
             self.assertEqual(choice_html.count('class="choice-dependencies"'), 2)
             self.assertIn('id="choice-instant-embedded-step-1-1"', choice_html)
             self.assertIn('id="choice-fresh-embedded-step-1-1"', choice_html)
+            self.assertEqual(choice_html.count('data-ratio-options="65|70|75"'), 2)
             choice_payload = next(recipe for recipe in payloads if recipe["id"] == "choice")
             choice_items = [item for item in choice_payload["shoppingIngredients"] if item.get("choice")]
             self.assertEqual(
                 [(item["name"], item["option"], item["default"]) for item in choice_items],
-                [("instant yeast", "instant", True), ("fresh yeast", "fresh", False)],
+                [
+                    ("instant yeast", "instant", True), ("water", "instant", True),
+                    ("fresh yeast", "fresh", False), ("water", "fresh", False),
+                ],
             )
             compound_html = (output / "recipes" / "compound-yield.html").read_text(encoding="utf-8")
             self.assertIn("data-compound-yield", compound_html)

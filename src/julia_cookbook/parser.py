@@ -196,6 +196,8 @@ def _render_inline(raw: str, annotations: list[Annotation], path: str, line: int
                 target = raw[label_end + 2 : target_end].strip()
                 if target.startswith("recipe:"):
                     href = f'../recipes/{quote(target.removeprefix("recipe:"), safe="-")}.html'
+                elif target.startswith("guide:"):
+                    href = f'../guides/{quote(target.removeprefix("guide:"), safe="-")}.html'
                 elif target.startswith("search:"):
                     href = f'../index.html?q={quote(target.removeprefix("search:"))}'
                 else:

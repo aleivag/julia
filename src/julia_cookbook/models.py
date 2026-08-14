@@ -81,6 +81,27 @@ class Recipe:
         }
 
 
+@dataclass(slots=True)
+class Guide:
+    id: str
+    metadata: dict[str, Any]
+    html: str
+    path: str
+    parameters: list[Annotation] = field(default_factory=list)
+
+    @property
+    def title(self) -> str:
+        return str(self.metadata.get("title", self.id.replace("-", " ").title()))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": 1,
+            "id": self.id,
+            "metadata": self.metadata,
+            "parameters": [item.to_dict() for item in self.parameters],
+        }
+
+
 class RecipeSyntaxError(ValueError):
     def __init__(self, path: str, line: int, message: str, hint: str = "") -> None:
         self.path = path

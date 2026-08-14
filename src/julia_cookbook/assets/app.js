@@ -55,8 +55,23 @@
       if (["kg", "kilogram", "kilograms"].includes(normalized)) return `${decimal(value * 2.20462)} lb`;
       if (["ml", "milliliter", "milliliters", "millilitre", "millilitres"].includes(normalized)) return `${decimal(value / 30)} fl oz`;
       if (["l", "liter", "liters", "litre", "litres"].includes(normalized)) return `${decimal(value / .946353)} qt`;
+      if (["cm", "centimeter", "centimeters", "centimetre", "centimetres"].includes(normalized)) return `${decimal(value / 2.54)} in`;
     }
+    if (system === "international" && ["in", "inch", "inches"].includes(normalized)) return `${decimal(value * 2.54)} cm`;
     return null;
+  };
+  const temperatureMeasure = (value, unit, system) => {
+    const source = String(unit || "").replace("°", "").toUpperCase();
+    if (!Number.isFinite(value) || !["F", "C"].includes(source)) return null;
+    const converted = system === "international" ? (source === "F" ? (value - 32) * 5 / 9 : value) : (source === "C" ? value * 9 / 5 + 32 : value);
+    const rounded = Math.abs(converted - Math.round(converted)) < .05 ? Math.round(converted) : Number(converted.toFixed(1));
+    return `${rounded}°${system === "international" ? "C" : "F"}`;
+  };
+  const smartRange = (raw, render) => {
+    const range = String(raw || "").trim().match(/^(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)$/);
+    if (range) return `${render(Number(range[1]))}–${render(Number(range[2]))}`;
+    const value = fraction(raw);
+    return value === null ? null : render(value);
   };
   const scaleQuantity = (raw, scale) => raw.split("+").map(term => {
     const match = term.trim().match(/^(.+?)(?:\s+([A-Za-z]+))?$/); if (!match) return term;
@@ -110,11 +125,7 @@
     };
     updateScaleSummary();
     const displayTemperature = (quantity, sourceUnit) => {
-      const value = Number(quantity), unit = sourceUnit.replace("°", "").toUpperCase();
-      if (!Number.isFinite(value) || !["F", "C"].includes(unit)) return `${quantity}°${sourceUnit}`;
-      const converted = unitSystem === "international" ? (unit === "F" ? (value - 32) * 5 / 9 : value) : (unit === "C" ? value * 9 / 5 + 32 : value);
-      const rounded = Math.abs(converted - Math.round(converted)) < 0.05 ? Math.round(converted) : Number(converted.toFixed(1));
-      return `${rounded}°${unitSystem === "international" ? "C" : "F"}`;
+      return smartRange(quantity, value => temperatureMeasure(value, sourceUnit, unitSystem)) || `${quantity}°${sourceUnit}`;
     };
     const displayMeasure = (quantity, unit, itemScale = 1) => {
       const numeric = fraction(quantity);
@@ -153,8 +164,8 @@
       const text = base !== null && ratio !== null ? `${displayMeasure(String(base * ratio / 100), el.dataset.baseUnit, scale)} (${ratio}%)` : `${el.dataset.ratio}%`;
       el.textContent = text;
       const row = el.closest("li"), index = row?.querySelector("[data-ingredient-index]")?.dataset.ingredientIndex;
-      const step = el.closest("[data-step]");
-      if (index !== undefined) step?.querySelector(`.instructions .annotation.ingredient[data-ingredient-index="${index}"] .inline-measure`)?.replaceChildren(text);
+      const scope = el.closest("[data-choice-panel]") || el.closest("[data-step]");
+      if (index !== undefined) scope?.querySelector(`.instructions .annotation.ingredient[data-ingredient-index="${index}"] .inline-measure`)?.replaceChildren(text);
     });
     applyScale(); ratioMeasures();
     const saveScale = () => { applyScale(); ratioMeasures(); updateScaleSummary(); if (bakersFormula) { store.preferences ||= {}; store.preferences[recipe.id] = { ...(store.preferences[recipe.id] || {}), hydration: Number(formulaHydration.value) }; } if (store.active[recipe.id]) { store.active[recipe.id].scale = scale; if (compoundYield) { store.active[recipe.id].yieldCount = Number(yieldCount.value); store.active[recipe.id].yieldEach = Number(yieldEach.value); } if (bakersFormula) store.active[recipe.id].hydration = Number(formulaHydration.value); } saveStore(); };
@@ -315,6 +326,33 @@
     }
   }
 
+  function setupGuide() {
+    const guide = payload.guide; if (!guide) return;
+    const preferenceKey = `guide:${guide.id}`;
+    let unitSystem = store.preferences?.[preferenceKey]?.units || payload.units || "international";
+    const render = () => {
+      document.querySelectorAll(".annotation.parameter").forEach(element => {
+        const name = element.dataset.name, quantity = element.dataset.quantity, unit = element.dataset.unit;
+        if (name === "temp") {
+          element.textContent = smartRange(quantity, value => temperatureMeasure(value, unit, unitSystem)) || `${quantity}°${unit}`;
+        } else if (["weight", "thickness"].includes(name)) {
+          element.textContent = smartRange(quantity, value => convertedMeasure(value, unit, unitSystem) || `${decimal(value)} ${unit}`) || `${quantity} ${unit}`;
+        } else {
+          element.textContent = `${quantity}${unit ? " " + unit : ""}`;
+        }
+      });
+      document.querySelectorAll("[data-guide-unit]").forEach(button => {
+        const active = button.dataset.guideUnit === unitSystem;
+        button.classList.toggle("active", active); button.setAttribute("aria-pressed", String(active));
+      });
+    };
+    document.querySelectorAll("[data-guide-unit]").forEach(button => button.addEventListener("click", () => {
+      unitSystem = button.dataset.guideUnit;
+      store.preferences ||= {}; store.preferences[preferenceKey] = { ...(store.preferences[preferenceKey] || {}), units: unitSystem }; saveStore(); render();
+    }));
+    render();
+  }
+
   const unitSeconds = { second:1, seconds:1, sec:1, minute:60, minutes:60, min:60, hour:3600, hours:3600, hr:3600 };
   function startTimer(element) {
     const raw = element.dataset.quantity, amount = fraction(raw.includes("-") ? raw.split("-")[0] : raw), seconds = amount * (unitSeconds[element.dataset.unit.toLowerCase()] || 60);
@@ -325,12 +363,14 @@
   }
 
   function setupIndex() {
-    if (!payload.recipes) return;
     const normalizeSearch = value => String(value).normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
     const search = document.querySelector("[data-search]");
+    if (!search) return;
     search.value = new URLSearchParams(location.search).get("q") || "";
     const filter = () => { const query = normalizeSearch(search.value), rawTag = new URLSearchParams(location.search).get("tag"), tag = rawTag ? normalizeSearch(rawTag) : null; let shown = 0; document.querySelectorAll(".recipe-card").forEach(card => { const visible = (!query || normalizeSearch(card.dataset.search).includes(query)) && (!tag || normalizeSearch(card.dataset.tags).split(" ").includes(tag)); card.hidden = !visible; shown += visible; }); document.querySelector("[data-empty]").hidden = !!shown; };
     search.addEventListener("input", filter); filter();
+    const shoppingButton = document.querySelector('[data-action="open-shopping"]');
+    if (!payload.recipes || !shoppingButton) return;
     const selected = new Set(); const updateCount = () => document.querySelector("[data-selected-count]").textContent = selected.size;
     document.querySelectorAll("[data-meal-recipe]").forEach(input => input.addEventListener("change", () => { input.checked ? selected.add(input.dataset.mealRecipe) : selected.delete(input.dataset.mealRecipe); updateCount(); }));
     let view = "merged";
@@ -348,7 +388,7 @@
       }));
       document.querySelector("[data-shopping-list]").innerHTML = groups.size ? [...groups.values()].map(group => `<section class="shopping-group"><h3>${escapeHtml(group.title)}</h3><ul>${group.items.map(item => `<li><label><input type="checkbox"> ${escapeHtml(item)}</label></li>`).join("")}</ul></section>`).join("") : '<p class="muted">Select recipes from the collection first.</p>';
     };
-    document.querySelector('[data-action="open-shopping"]').addEventListener("click", () => { renderShopping(); document.querySelector("#shopping-dialog").showModal(); });
+    shoppingButton.addEventListener("click", () => { renderShopping(); document.querySelector("#shopping-dialog").showModal(); });
     document.querySelectorAll("[data-shopping-view]").forEach(button => button.addEventListener("click", event => { event.preventDefault(); view = button.dataset.shoppingView; document.querySelectorAll("[data-shopping-view]").forEach(item => item.classList.toggle("active", item === button)); renderShopping(); }));
     document.querySelector('[data-action="clear-shopping"]').addEventListener("click", event => { event.preventDefault(); selected.clear(); document.querySelectorAll("[data-meal-recipe]").forEach(input => input.checked = false); updateCount(); renderShopping(); });
     document.querySelector('[data-action="copy-shopping"]').addEventListener("click", async event => { event.preventDefault(); const text = [...document.querySelectorAll("[data-shopping-list] h3,[data-shopping-list] li")].map(el => el.tagName === "H3" ? `\n${el.textContent}` : `- ${el.textContent.trim()}`).join("\n"); await navigator.clipboard.writeText(text); toast("Shopping list copied"); });
@@ -384,6 +424,6 @@
     async function create() { const boundary = `julia_${Date.now()}`, metadata = JSON.stringify({ name: "julia-cookbook-v1.json", parents: ["appDataFolder"] }); const body = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(store)}\r\n--${boundary}--`; await api("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", { method:"POST", headers:{"Content-Type":`multipart/related; boundary=${boundary}`}, body }); }
     async function upload(id) { await api(`https://www.googleapis.com/upload/drive/v3/files/${id}?uploadType=media`, { method:"PATCH", headers:{"Content-Type":"application/json"}, body:JSON.stringify(store) }); }
   }
-  setupRecipe(); setupIndex(); setupDrive().catch(() => {});
-  if ("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register(`${document.documentElement.dataset.page === "recipe" ? "../" : ""}sw.js`).catch(() => {});
+  setupRecipe(); setupGuide(); setupIndex(); setupDrive().catch(() => {});
+  if ("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register(`${["recipe","guide"].includes(document.documentElement.dataset.page) ? "../" : ""}sw.js`).catch(() => {});
 })();

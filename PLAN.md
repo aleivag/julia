@@ -487,6 +487,21 @@ steps carrying `[choice=name, option=value]` share one displayed step, and
 produce the same output contract; the selected branch controls Cook Mode and
 shopping ingredients.
 
+### Guides
+
+Guides are implemented as Markdown files in `guides/`. They provide searchable
+reference material without recipe yields, shopping data, or cooking-progress
+state. Guide prose and tables support smart `$temp`, `$weight`, `$time`, and
+`$thickness` annotations. Scalar and range measurements respond to the
+International/Imperial control, and recipes can link to guides with `guide:`
+links. More structured calculators and recipe validation against guide targets
+remain future work.
+
+The generated site separates its three primary content types: `/` is the
+default Recipes collection, `/guides/` contains reference guides, and `/feasts/`
+contains gathering and menu documents. Persistent navigation connects all three
+sections; search remains scoped to the active section.
+
 ### Feasts
 
 Feasts are first-class TOML documents in `feasts/`. They describe ordered menu

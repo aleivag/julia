@@ -15,9 +15,22 @@ julia serve . --watch
 julia feast serve . --watch
 ```
 
-Projects contain a `.julia` TOML configuration file and a `recipes/` directory.
+Projects contain a `.julia` TOML configuration file, a `recipes/` directory, and
+optionally a `guides/` directory for reference material such as temperature and
+timing charts.
 See [RECIPE_FORMAT.md](RECIPE_FORMAT.md) for the recipe language and `PLAN.md`
 for the broader product design.
+
+The generated collection is divided by content type:
+
+```text
+/               Recipes (default)
+/guides/        Reference guides
+/feasts/        Gatherings and menus
+```
+
+Each section has its own search and presentation. Shopping-list controls remain
+on the Recipes page only.
 
 Cookbook identity is separate from the Julia framework:
 

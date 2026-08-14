@@ -10,8 +10,9 @@ from pathlib import Path
 from typing import Any
 
 from .dependencies import default_steps, dependency_scale, scaled_quantity, validate_step_products, walk_recipe
-from .models import Annotation, Recipe
+from .models import Annotation, Guide, Recipe
 from .parser import parse_recipe
+from .guides import parse_guide
 from .feasts import build_feasts
 from .yields import parse_yield
 
@@ -85,6 +86,11 @@ def _shell(title: str, content: str, site: dict[str, Any], page: str, data: dict
     author_text = f'<span class="cookbook-author">By {escape(author_name)}</span>' if author_name else ""
     author_socials = f'<span class="author-links">{"".join(author_links)}</span>' if author_links else ""
     payload = json.dumps(data or {}, separators=(",", ":"), ensure_ascii=True).replace("</", "<\\/")
+    nested = page != "index"
+    prefix = "../" if nested else ""
+    recipes_current = ' aria-current="page"' if page in {"index", "recipe"} else ""
+    guides_current = ' aria-current="page"' if page in {"guides", "guide"} else ""
+    feasts_current = ' aria-current="page"' if page == "feasts" else ""
     return f'''<!doctype html>
 <html lang="en" data-page="{page}">
 <head>
@@ -93,15 +99,17 @@ def _shell(title: str, content: str, site: dict[str, Any], page: str, data: dict
   <meta name="theme-color" content="#f7f3e8">
   <meta name="description" content="{escape(str(site.get('description', 'A local-first cookbook.')))}">
   <title>{escape(title)} | {site_title}</title>
-  <link rel="manifest" href="{('../' if page == 'recipe' else '')}manifest.webmanifest">
-  <link rel="stylesheet" href="{('../' if page == 'recipe' else '')}assets/styles.css?v={asset_version}">
+  <link rel="manifest" href="{prefix}manifest.webmanifest">
+  <link rel="stylesheet" href="{prefix}assets/styles.css?v={asset_version}">
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
   <header class="site-header">
-    <a class="brand" href="{('../' if page == 'recipe' else '')}index.html">{site_title}</a>
+    <a class="brand" href="{prefix}index.html">{site_title}</a>
     <nav aria-label="Primary">
-      <a href="{('../' if page == 'recipe' else '')}index.html">Recipes</a>
+      <a href="{prefix}index.html"{recipes_current}>Recipes</a>
+      <a href="{prefix}guides/index.html"{guides_current}>Guides</a>
+      <a href="{prefix}feasts/index.html"{feasts_current}>Feasts</a>
       <button class="icon-button" data-action="open-data" title="Data and sync" aria-label="Data and sync">&#8635;</button>
     </nav>
   </header>
@@ -115,7 +123,7 @@ def _shell(title: str, content: str, site: dict[str, Any], page: str, data: dict
   <footer class="site-footer"><div>{author_text}{author_socials}</div><div>Built with <a class="julia-link" href="https://github.com/aleivag/julia">julia</a></div></footer>
   <div id="toast" role="status" aria-live="polite"></div>
   <script id="julia-data" type="application/json">{payload}</script>
-  <script src="{('../' if page == 'recipe' else '')}assets/app.js?v={asset_version}" defer></script>
+  <script src="{prefix}assets/app.js?v={asset_version}" defer></script>
 </body>
 </html>'''
 
@@ -283,7 +291,7 @@ def _step_groups(recipe: Recipe) -> list[list[Any]]:
     return groups
 
 
-def _choice_step(group: list[Any], display_number: int, recipes: dict[str, Recipe], recipe_id: str) -> str:
+def _choice_step(group: list[Any], display_number: int, recipes: dict[str, Recipe], recipe_id: str, ratio_base: Annotation | None = None) -> str:
     choice = group[0].attributes["choice"]
     default = next((step for step in group if step.attributes.get("default") == "true"), group[0])
     controls = []
@@ -298,8 +306,16 @@ def _choice_step(group: list[Any], display_number: int, recipes: dict[str, Recip
         ingredients = []
         for index, item in enumerate(step.ingredients):
             check_key = f"{step_key}:ingredient:{index}"
+            is_ratio = item.unit.lower() == "bakers"
+            item_ratio_base = ratio_base
+            display = f"{item.quantity}%" if is_ratio else _quantity(item)
+            measure_attrs = f'data-quantity="{escape(item.quantity)}" data-unit="{escape(item.unit)}"'
+            if is_ratio and item_ratio_base:
+                measure_attrs += f' data-ratio="{escape(item.quantity)}" data-base-quantity="{escape(item_ratio_base.quantity)}" data-base-unit="{escape(item_ratio_base.unit)}"'
+                if item.attributes.get("options"):
+                    measure_attrs += f' data-ratio-options="{escape(item.attributes["options"])}"'
             ingredients.append(
-                f'<li><label><input type="checkbox" data-check="choice-ingredient" data-key="{escape(check_key)}" data-embedded-check="{escape(check_key)}"><span class="measure" data-quantity="{escape(item.quantity)}" data-unit="{escape(item.unit)}">{escape(_quantity(item))}</span><span>{escape(item.name)}</span>{f"<small>{escape(item.note)}</small>" if item.note else ""}</label></li>'
+                f'<li><label><input type="checkbox" data-check="choice-ingredient" data-key="{escape(check_key)}" data-ingredient-index="{index}" data-embedded-check="{escape(check_key)}"><span class="measure" {measure_attrs}>{escape(display)}</span><span>{escape(item.name)}</span>{f"<small>{escape(item.note)}</small>" if item.note else ""}</label></li>'
             )
         outputs = "".join(
             f'<li>{_product_measure(item)}<span>{escape(item.name)}</span></li>'
@@ -415,7 +431,7 @@ def _recipe_page(recipe: Recipe, recipes: dict[str, Recipe], site: dict[str, Any
     for index, group in enumerate(step_groups):
         step = group[0]
         if step.attributes.get("choice"):
-            steps.append(_choice_step(group, index + 1, recipes, recipe.id))
+            steps.append(_choice_step(group, index + 1, recipes, recipe.id, ratio_base))
             for item in step.outputs:
                 product_sources[item.name.casefold()] = (index + 1, step.title)
             continue
@@ -539,12 +555,26 @@ def _recipe_payloads(recipes: list[Recipe]) -> list[dict[str, Any]]:
     return payloads
 
 
+def _guide_page(guide: Guide, site: dict[str, Any], sync: dict[str, Any]) -> str:
+    meta = guide.metadata
+    tags = "".join(f'<a href="index.html?tag={escape(str(tag))}">{escape(str(tag))}</a>' for tag in meta.get("tags", []))
+    headnote = escape(str(meta.get("headnote") or meta.get("description") or ""))
+    source = ""
+    if meta.get("source"):
+        source = f'<p class="source">From <a href="{escape(str(meta.get("source_url", "#")))}">{escape(str(meta["source"]))}</a></p>'
+    unit_system = str(meta.get("units", site.get("unit_system", "international"))).lower()
+    if unit_system not in {"international", "imperial"}:
+        unit_system = "international"
+    controls = '''<fieldset class="unit-system guide-units"><legend>Units</legend><div role="group" aria-label="Measurement units"><button type="button" data-guide-unit="international">International</button><button type="button" data-guide-unit="imperial">Imperial</button></div></fieldset>'''
+    content = f'''<header class="guide-hero"><div><p class="eyebrow">Guide</p><h1>{escape(guide.title)}</h1>{f'<p class="guide-headnote">{headnote}</p>' if headnote else ''}{source}<div class="tag-list">{tags}</div></div>{controls}</header><article class="guide-content">{guide.html}</article>'''
+    return _shell(guide.title, content, site, "guide", {"guide": guide.to_dict(), "units": unit_system, "sync": {"googleClientId": sync.get("google_client_id", "")}})
+
+
 def _index_page(
     recipes: list[Recipe],
     recipe_payloads: list[dict[str, Any]],
     site: dict[str, Any],
     sync: dict[str, Any],
-    feasts: list[Any] | None = None,
 ) -> str:
     cards = []
     for recipe in recipes:
@@ -556,13 +586,34 @@ def _index_page(
           <label class="select-recipe"><input type="checkbox" data-meal-recipe="{recipe.id}" aria-label="Add {escape(recipe.title)} to shopping list"></label>
           <a href="recipes/{recipe.id}.html"><p class="eyebrow">{len(recipe.steps)} steps &middot; {ingredient_count} ingredients</p><h2>{escape(recipe.title)}</h2><p>{escape(headnote)}</p><div class="tag-list">{''.join(f'<span>{escape(str(tag))}</span>' for tag in recipe.metadata.get('tags', []))}</div></a>
         </article>''')
-    feast_items = "".join(f'<li><a href="feasts/{escape(feast.id)}/index.html"><span>{escape(feast.title)}</span><small>{len(feast.dishes)} dishes</small></a></li>' for feast in (feasts or []))
-    feast_section = f'<section class="feast-index"><p class="eyebrow">Feasts</p><h2>Gatherings and menus</h2><ul>{feast_items}</ul></section>' if feast_items else ""
-    content = f'''<section class="library-head"><div><p class="eyebrow">The working collection</p><h1>{escape(str(site.get('title', 'My Cookbook')))}</h1><p>{escape(str(site.get('description', 'Recipes tested, adjusted, and kept.')))}</p></div><div class="library-tools"><label class="search"><span class="sr-only">Search recipes</span><input type="search" data-search placeholder="Search recipes"></label><button data-action="open-shopping">Shopping list <span data-selected-count>0</span></button></div></section>
-      {feast_section}<section class="recipe-grid" aria-label="Recipes">{''.join(cards)}</section><p class="empty-state" hidden data-empty>No recipes match your search.</p>
+    content = f'''<section class="library-head"><div><p class="eyebrow">Recipes</p><h1>{escape(str(site.get('title', 'My Cookbook')))}</h1><p>{escape(str(site.get('description', 'Recipes tested, adjusted, and kept.')))}</p></div><div class="library-tools"><label class="search"><span class="sr-only">Search recipes</span><input type="search" data-search placeholder="Search recipes"></label><button data-action="open-shopping">Shopping list <span data-selected-count>0</span></button></div></section>
+      <section class="recipe-grid" aria-label="Recipes">{''.join(cards)}</section><p class="empty-state" hidden data-empty>No recipes match your search.</p>
       <dialog id="shopping-dialog" class="shopping-dialog"><form method="dialog" class="dialog-head"><h2>Shopping list</h2><button class="icon-button" aria-label="Close">&times;</button></form><div class="shopping-tabs"><button class="active" data-shopping-view="merged">Merged</button><button data-shopping-view="component">By recipe</button></div><div data-shopping-list></div><div class="button-row"><button data-action="copy-shopping">Copy list</button><button class="secondary" data-action="clear-shopping">Clear</button></div></dialog>'''
     data = {"recipes": recipe_payloads, "sync": {"googleClientId": sync.get("google_client_id", "")}}
     return _shell(str(site.get("title", "My Cookbook")), content, site, "index", data)
+
+
+def _guides_index_page(guides: list[Guide], site: dict[str, Any], sync: dict[str, Any]) -> str:
+    cards = []
+    for guide in guides:
+        tags = " ".join(str(tag) for tag in guide.metadata.get("tags", []))
+        product = str(guide.metadata.get("product", ""))
+        headnote = str(guide.metadata.get("headnote") or guide.metadata.get("description") or "Reference guide")
+        format_name = str(guide.metadata.get("format", "reference")).replace("-", " ").title()
+        cards.append(f'''<article class="recipe-card guide-card" data-search="{escape(_search_key(guide.title + ' ' + tags + ' ' + product))}" data-tags="{escape(_search_key(tags))}"><a href="{guide.id}.html"><p class="eyebrow">{escape(format_name)}</p><h2>{escape(guide.title)}</h2><p>{escape(headnote)}</p><div class="tag-list">{''.join(f'<span>{escape(str(tag))}</span>' for tag in guide.metadata.get('tags', []))}</div></a></article>''')
+    content = f'''<section class="library-head"><div><p class="eyebrow">Guides</p><h1>Cooking references</h1><p>Temperature charts, technique notes, and useful resources.</p></div><div class="library-tools"><label class="search"><span class="sr-only">Search guides</span><input type="search" data-search placeholder="Search guides"></label></div></section><section class="recipe-grid guide-grid" aria-label="Guides">{''.join(cards)}</section><p class="empty-state" hidden data-empty>No guides match your search.</p>'''
+    return _shell("Guides", content, site, "guides", {"collection": "guides", "sync": {"googleClientId": sync.get("google_client_id", "")}})
+
+
+def _feasts_index_page(feasts: list[Any], site: dict[str, Any], sync: dict[str, Any]) -> str:
+    cards = []
+    for feast in feasts:
+        details = " · ".join(item for item in (feast.date, feast.location) if item)
+        description = feast.headnote or feast.invitation or f"{len(feast.dishes)} dishes"
+        search = " ".join((feast.title, feast.date, feast.location, description))
+        cards.append(f'''<article class="recipe-card feast-card" data-search="{escape(_search_key(search))}" data-tags=""><a href="{escape(feast.id)}/index.html"><p class="eyebrow">{escape(details or f'{len(feast.dishes)} dishes')}</p><h2>{escape(feast.title)}</h2><p>{escape(description)}</p><div class="feast-card-meta"><span>{len(feast.dishes)} dishes</span>{f'<span>Serves {feast.serves:g}</span>' if feast.serves else ''}</div></a></article>''')
+    content = f'''<section class="library-head"><div><p class="eyebrow">Feasts</p><h1>Gatherings and menus</h1><p>Menus, kitchen booklets, and shopping plans for cooking together.</p></div><div class="library-tools"><label class="search"><span class="sr-only">Search feasts</span><input type="search" data-search placeholder="Search feasts"></label></div></section><section class="recipe-grid feast-grid" aria-label="Feasts">{''.join(cards)}</section><p class="empty-state" hidden data-empty>No feasts match your search.</p>'''
+    return _shell("Feasts", content, site, "feasts", {"collection": "feasts", "sync": {"googleClientId": sync.get("google_client_id", "")}})
 
 
 def build(root: str | Path = ".") -> tuple[Path, list[Recipe]]:
@@ -577,6 +628,8 @@ def build(root: str | Path = ".") -> tuple[Path, list[Recipe]]:
     if not recipe_dir.is_dir():
         raise FileNotFoundError(f"Recipe directory not found: {recipe_dir}")
     recipes = sorted((parse_recipe(path) for path in recipe_dir.glob("*.md")), key=lambda item: item.title.lower())
+    guide_dir = root_path / "guides"
+    guides = sorted((parse_guide(path) for path in guide_dir.glob("*.md")), key=lambda item: item.title.lower()) if guide_dir.is_dir() else []
     for recipe in recipes:
         validate_step_products(recipe)
     recipe_map = {recipe.id: recipe for recipe in recipes}
@@ -589,17 +642,25 @@ def build(root: str | Path = ".") -> tuple[Path, list[Recipe]]:
     recipe_payloads = _recipe_payloads(recipes)
     output = root_path / str(site.get("output", "build"))
     (output / "recipes").mkdir(parents=True, exist_ok=True)
+    (output / "guides").mkdir(parents=True, exist_ok=True)
+    (output / "feasts").mkdir(parents=True, exist_ok=True)
     (output / "sources").mkdir(parents=True, exist_ok=True)
     (output / "assets").mkdir(parents=True, exist_ok=True)
     for stale in (output / "recipes").glob("*.html"):
+        stale.unlink()
+    for stale in (output / "guides").glob("*.html"):
         stale.unlink()
     for stale in (output / "sources").glob("*.html"):
         stale.unlink()
     for recipe in recipes:
         (output / "recipes" / f"{recipe.id}.html").write_text(_recipe_page(recipe, recipe_map, site, sync), encoding="utf-8")
         (output / "sources" / f"{recipe.id}.html").write_text(_source_page(recipe, site, sync), encoding="utf-8")
+    for guide in guides:
+        (output / "guides" / f"{guide.id}.html").write_text(_guide_page(guide, site, sync), encoding="utf-8")
     feasts = build_feasts(root_path, output, recipes)
-    (output / "index.html").write_text(_index_page(recipes, recipe_payloads, site, sync, feasts), encoding="utf-8")
+    (output / "index.html").write_text(_index_page(recipes, recipe_payloads, site, sync), encoding="utf-8")
+    (output / "guides" / "index.html").write_text(_guides_index_page(guides, site, sync), encoding="utf-8")
+    (output / "feasts" / "index.html").write_text(_feasts_index_page(feasts, site, sync), encoding="utf-8")
     for asset in ("styles.css", "app.js", "icon.svg"):
         shutil.copyfile(PACKAGE_DIR / "assets" / asset, output / "assets" / asset)
     shutil.copyfile(PACKAGE_DIR / "assets" / "sw.js", output / "sw.js")

@@ -129,6 +129,46 @@ culinary quantities. Supported ingredient conversions include `oz`/`lb` ↔
 `g`/`kg` and `tsp`/`tbsp`/`cups`/`fl oz`/`qt` ↔ `ml`/`L`. Unknown units and
 free-form compound quantities remain as authored.
 
+## Guides
+
+Files in `guides/` are searchable reference pages rather than recipes. They do
+not have yields, shopping ingredients, scaling, or cooking-progress state.
+
+```markdown
+---
+title: Turkey Temperature and Timing
+headnote: Compare roasting and sous vide targets.
+product: turkey
+format: time-temperature
+tags: [turkey, temperature, sous-vide]
+source: USDA Turkey Roasting Charts
+source_url: https://example.com/turkey
+---
+
+## Whole turkey
+
+| Weight | Oven | Time |
+|---|---|---|
+| $weight{8-12%lb} | $temp{325%F} | $time{2.75-3%hours} |
+```
+
+Guide tables and prose support smart parameters:
+
+```markdown
+$temp{145%F}
+$weight{8-12%lb}
+$time{3-4%hours}
+$thickness{2%in}
+```
+
+Temperature, weight, and thickness values—including ranges—respond to the
+guide's International/Imperial control. Time remains unit-aware but is not
+converted. Link to a guide from a recipe or another guide with:
+
+```markdown
+See [Turkey temperatures](guide:turkey-temperature-and-timing).
+```
+
 ## Markers
 
 ### External ingredients: `@`

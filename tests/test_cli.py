@@ -22,6 +22,17 @@ class CliTests(TestCase):
             recipe.write_text("second version", encoding="utf-8")
             self.assertNotEqual(before, _project_signature(root))
 
+    def test_watch_signature_tracks_guide_changes(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            guides = root / "guides"
+            guides.mkdir()
+            guide = guides / "turkey.md"
+            guide.write_text("first", encoding="utf-8")
+            before = _project_signature(root)
+            guide.write_text("second version", encoding="utf-8")
+            self.assertNotEqual(before, _project_signature(root))
+
     def test_live_reload_is_injected_once(self) -> None:
         with TemporaryDirectory() as directory:
             output = Path(directory)

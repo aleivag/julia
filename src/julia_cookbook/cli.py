@@ -107,7 +107,7 @@ def _inject_live_reload(output: Path) -> None:
 
 def _project_signature(root: Path) -> tuple[tuple[str, int, int], ...]:
     paths = [root / ".julia"]
-    for directory, suffixes in ((root / "recipes", {".md"}), (root / "feasts", {".toml", ".md"})):
+    for directory, suffixes in ((root / "recipes", {".md"}), (root / "guides", {".md"}), (root / "feasts", {".toml", ".md"})):
         if directory.is_dir():
             paths.extend(path for path in directory.rglob("*") if path.is_file() and path.suffix.lower() in suffixes)
     signature = []
@@ -193,7 +193,7 @@ def main(argv: list[str] | None = None) -> int:
             root = Path(args.path).resolve()
             watcher = threading.Thread(target=_watch, args=(root, output, reload_state, stop), daemon=True)
             watcher.start()
-            print("Watching .julia, recipes/, and feasts/ for changes")
+            print("Watching .julia, recipes/, guides/, and feasts/ for changes")
         try:
             server.serve_forever()
         except KeyboardInterrupt:
