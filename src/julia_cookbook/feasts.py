@@ -151,10 +151,18 @@ def render_shopping(feast: Feast, recipes: dict[str, Recipe]) -> str:
         else:
             merged[key] = (name, unit, amount, {recipe})
     merged_rows = [(name, _display_amount(total), unit, ", ".join(sorted(sources))) for name, unit, total, sources in merged.values()]
-    items = "".join(f'<li><span>{escape(quantity)} {escape(unit)} {escape(name)}</span><small>{escape(recipe)}</small></li>' for name, quantity, unit, recipe in merged_rows + loose)
+    item_rows = []
+    key_counts: dict[str, int] = {}
+    for name, quantity, unit, recipe in merged_rows + loose:
+        base_key = f"{name.casefold()}|{unit.casefold()}"
+        key_counts[base_key] = key_counts.get(base_key, 0) + 1
+        key = base_key if key_counts[base_key] == 1 else f"{base_key}|{key_counts[base_key]}"
+        item_rows.append(f'<li><label><input type="checkbox" data-feast-shopping-item="{escape(key)}"><span>{escape(quantity)} {escape(unit)} {escape(name)}</span></label><small>{escape(recipe)}</small></li>')
+    items = "".join(item_rows)
     missing = [dish for dish in feast.dishes if dish.recipe and dish.recipe not in recipes or not dish.recipe]
     missing_html = "" if not missing else '<section class="shopping-missing"><h2>Recipes still needed</h2><ul>' + "".join(f'<li>{escape(_dish_name(dish, recipes))}</li>' for dish in missing) + "</ul></section>"
-    return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{escape(feast.title)} · Shopping</title><link rel="stylesheet" href="../../assets/styles.css"></head><body class="feast-page"><main class="feast-document"><a href="index.html">Back to feast</a><h1>{escape(feast.title)}</h1><h2>Shopping list</h2><ul class="feast-shopping">{items}</ul>{missing_html}</main></body></html>'''
+    payload = json.dumps({"feastShopping": {"id": feast.id}}, separators=(",", ":"))
+    return f'''<!doctype html><html lang="en" data-page="feast-shopping"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{escape(feast.title)} · Shopping</title><link rel="stylesheet" href="../../assets/styles.css"></head><body class="feast-page"><main class="feast-document"><a href="index.html">Back to feast</a><h1>{escape(feast.title)}</h1><h2>Shopping list</h2><p class="muted">Checked items stay checked on this device.</p><ul class="feast-shopping">{items}</ul>{missing_html}</main><script type="application/json" id="julia-data">{payload}</script><script src="../../assets/app.js" defer></script></body></html>'''
 
 
 def render_booklet(feast: Feast, recipes: dict[str, Recipe]) -> str:

@@ -57,7 +57,8 @@ julia feast serve .
 ```
 
 Each feast generates an overview, printable menu, kitchen booklet, and shopping
-list. Guest names, allergies, and private addresses belong in a private feast
+list. Shopping-list checkboxes persist locally per feast, so completed items
+remain crossed out after refreshing the page. Guest names, allergies, and private addresses belong in a private feast
 repository, not a public cookbook.
 
 Dish presentation can be customized without changing the underlying recipe:

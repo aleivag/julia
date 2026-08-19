@@ -353,6 +353,20 @@
     render();
   }
 
+  function setupFeastShopping() {
+    const feast = payload.feastShopping; if (!feast?.id) return;
+    store.preferences ||= {}; store.preferences.feastShopping ||= {};
+    const checked = store.preferences.feastShopping[feast.id] || {};
+    document.querySelectorAll("[data-feast-shopping-item]").forEach(input => {
+      input.checked = !!checked[input.dataset.feastShoppingItem];
+      input.addEventListener("change", () => {
+        checked[input.dataset.feastShoppingItem] = input.checked;
+        store.preferences.feastShopping[feast.id] = checked;
+        saveStore();
+      });
+    });
+  }
+
   const unitSeconds = { second:1, seconds:1, sec:1, minute:60, minutes:60, min:60, hour:3600, hours:3600, hr:3600 };
   function startTimer(element) {
     const raw = element.dataset.quantity, amount = fraction(raw.includes("-") ? raw.split("-")[0] : raw), seconds = amount * (unitSeconds[element.dataset.unit.toLowerCase()] || 60);
@@ -424,6 +438,10 @@
     async function create() { const boundary = `julia_${Date.now()}`, metadata = JSON.stringify({ name: "julia-cookbook-v1.json", parents: ["appDataFolder"] }); const body = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(store)}\r\n--${boundary}--`; await api("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", { method:"POST", headers:{"Content-Type":`multipart/related; boundary=${boundary}`}, body }); }
     async function upload(id) { await api(`https://www.googleapis.com/upload/drive/v3/files/${id}?uploadType=media`, { method:"PATCH", headers:{"Content-Type":"application/json"}, body:JSON.stringify(store) }); }
   }
-  setupRecipe(); setupGuide(); setupIndex(); setupDrive().catch(() => {});
-  if ("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register(`${["recipe","guide"].includes(document.documentElement.dataset.page) ? "../" : ""}sw.js`).catch(() => {});
+  setupRecipe(); setupGuide(); setupFeastShopping(); setupIndex(); setupDrive().catch(() => {});
+  if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
+    const page = document.documentElement.dataset.page;
+    const prefix = page === "feast-shopping" ? "../../" : ["recipe","guide"].includes(page) ? "../" : "";
+    navigator.serviceWorker.register(`${prefix}sw.js`).catch(() => {});
+  }
 })();
