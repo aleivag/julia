@@ -10,6 +10,30 @@
   const uuid = () => crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const download = (name, content) => { const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([content], { type: "application/json" })); link.download = name; link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 1000); };
 
+  function setupTheme() {
+    const root = document.documentElement;
+    const allowed = new Set(["auto", "nordic", "night", "editorial"]);
+    const media = matchMedia("(prefers-color-scheme: dark)");
+    const select = document.querySelector("[data-theme-select]");
+    let theme = store.preferences?.theme || root.dataset.themeDefault || "auto";
+    if (!allowed.has(theme)) theme = "auto";
+    const apply = () => {
+      const effective = theme === "auto" ? (media.matches ? "night" : "nordic") : theme;
+      root.dataset.theme = theme;
+      root.dataset.themeEffective = effective;
+      root.style.colorScheme = effective === "night" ? "dark" : "light";
+      const meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.content = effective === "night" ? "#151816" : effective === "editorial" ? "#f6f0e5" : "#f5f7f8";
+      if (select) select.value = theme;
+    };
+    select?.addEventListener("change", () => {
+      theme = allowed.has(select.value) ? select.value : "auto";
+      store.preferences ||= {}; store.preferences.theme = theme; saveStore(); apply();
+    });
+    media.addEventListener?.("change", () => { if (theme === "auto") apply(); });
+    apply();
+  }
+
   document.querySelector('[data-action="open-data"]')?.addEventListener("click", () => document.querySelector("#data-dialog").showModal());
   document.querySelector('[data-action="export-data"]')?.addEventListener("click", event => { event.preventDefault(); download(`julia-cookbook-${new Date().toISOString().slice(0,10)}.json`, JSON.stringify(store, null, 2)); toast("Cookbook data exported"); });
   document.querySelector('[data-action="import-data"]')?.addEventListener("change", async event => {
@@ -80,9 +104,14 @@
 
   function setupRecipe() {
     const recipe = payload.recipe; if (!recipe) return;
-    const active = store.active[recipe.id];
+    const recipeKey = recipe.storageId || recipe.id;
+    if (recipe.variant) {
+      store.preferences ||= {}; store.preferences[recipe.parentId || recipe.id] ||= {};
+      store.preferences[recipe.parentId || recipe.id].variant = recipe.variant; saveStore();
+    }
+    const active = store.active[recipeKey];
     const renderHistory = () => {
-      const entries = store.events.filter(event => event.recipeId === recipe.id).sort((a,b) => b.completedAt.localeCompare(a.completedAt));
+      const entries = store.events.filter(event => event.recipeId === recipeKey).sort((a,b) => b.completedAt.localeCompare(a.completedAt));
       const target = document.querySelector("[data-cook-history]");
       target.innerHTML = entries.length ? entries.map(event => `<article class="history-entry"><div><time>${new Date(event.completedAt).toLocaleDateString()}</time><br><small>${event.scale}x recipe</small></div><div><div class="history-title"><span class="history-outcome">${escapeHtml({worked:"Worked well",change:"Would change",failed:"Did not work"}[event.outcome] || event.outcome)}</span><button class="history-delete" data-delete-event="${escapeHtml(event.id)}">Delete</button></div><p>${escapeHtml(event.summary || "No summary")}</p></div></article>`).join("") : '<p class="muted">No completed cooks on this device yet.</p>';
       target.querySelectorAll("[data-delete-event]").forEach(button => button.addEventListener("click", () => {
@@ -110,10 +139,10 @@
     if (active?.yieldEach && yieldEach) yieldEach.value = active.yieldEach;
     if (bakersFormula) {
       formulaFlour.value = Number((Number(bakersFormula.dataset.originalFlour) * scale).toFixed(2));
-      formulaHydration.value = String(active?.hydration || store.preferences?.[recipe.id]?.hydration || bakersFormula.dataset.originalHydration);
+      formulaHydration.value = String(active?.hydration || store.preferences?.[recipeKey]?.hydration || bakersFormula.dataset.originalHydration);
     }
     const scaleSummary = document.querySelector("[data-scale-summary]");
-    let unitSystem = store.preferences?.[recipe.id]?.units || payload.units || "international";
+    let unitSystem = store.preferences?.[recipeKey]?.units || payload.units || "international";
     if (!scaleSelect.querySelector(`option[value="${scale}"]`)) scaleSelect.value = "custom";
     const scaledAnchorValue = input => Number((Number(input.dataset.anchorOriginal) * scale).toFixed(3));
     anchorInputs.forEach(input => input.value = scaledAnchorValue(input));
@@ -139,7 +168,7 @@
     };
     document.querySelectorAll("[data-unit-system]").forEach(button => button.addEventListener("click", () => {
       unitSystem = button.dataset.unitSystem;
-      store.preferences ||= {}; store.preferences[recipe.id] = { ...(store.preferences[recipe.id] || {}), units: unitSystem }; saveStore(); applyUnits(); applyScale(); ratioMeasures();
+      store.preferences ||= {}; store.preferences[recipeKey] = { ...(store.preferences[recipeKey] || {}), units: unitSystem }; saveStore(); applyUnits(); applyScale(); ratioMeasures();
     }));
     applyUnits();
     const countScale = () => compoundYield ? Number(yieldCount.value) / Number(compoundYield.dataset.originalCount) : scale;
@@ -168,7 +197,7 @@
       if (index !== undefined) scope?.querySelector(`.instructions .annotation.ingredient[data-ingredient-index="${index}"] .inline-measure`)?.replaceChildren(text);
     });
     applyScale(); ratioMeasures();
-    const saveScale = () => { applyScale(); ratioMeasures(); updateScaleSummary(); if (bakersFormula) { store.preferences ||= {}; store.preferences[recipe.id] = { ...(store.preferences[recipe.id] || {}), hydration: Number(formulaHydration.value) }; } if (store.active[recipe.id]) { store.active[recipe.id].scale = scale; if (compoundYield) { store.active[recipe.id].yieldCount = Number(yieldCount.value); store.active[recipe.id].yieldEach = Number(yieldEach.value); } if (bakersFormula) store.active[recipe.id].hydration = Number(formulaHydration.value); } saveStore(); };
+    const saveScale = () => { applyScale(); ratioMeasures(); updateScaleSummary(); if (bakersFormula) { store.preferences ||= {}; store.preferences[recipeKey] = { ...(store.preferences[recipeKey] || {}), hydration: Number(formulaHydration.value) }; } if (store.active[recipeKey]) { store.active[recipeKey].scale = scale; if (compoundYield) { store.active[recipeKey].yieldCount = Number(yieldCount.value); store.active[recipeKey].yieldEach = Number(yieldEach.value); } if (bakersFormula) store.active[recipeKey].hydration = Number(formulaHydration.value); } saveStore(); };
     const updateAnchors = source => anchorInputs.forEach(input => { if (input !== source) input.value = scaledAnchorValue(input); });
     const formulaFromTarget = () => {
       const target = Number(yieldCount.value) * Number(yieldEach.value);
@@ -194,7 +223,7 @@
 
     document.querySelectorAll("[data-choice-step]").forEach(choiceStep => {
       const choice = choiceStep.dataset.choiceStep;
-      const saved = store.preferences?.[recipe.id]?.choices?.[choice];
+      const saved = store.preferences?.[recipeKey]?.choices?.[choice];
       const select = option => {
         choiceStep.querySelectorAll("[data-choice-panel]").forEach(panel => { panel.hidden = panel.dataset.choicePanel !== option; });
         choiceStep.querySelectorAll("[data-choice-select]").forEach(input => { input.checked = input.value === option; });
@@ -202,8 +231,8 @@
       select(saved || choiceStep.dataset.choiceDefault);
       choiceStep.querySelectorAll("[data-choice-select]").forEach(input => input.addEventListener("change", () => {
         if (!input.checked) return;
-        store.preferences ||= {}; store.preferences[recipe.id] ||= {}; store.preferences[recipe.id].choices ||= {};
-        store.preferences[recipe.id].choices[choice] = input.value; saveStore(); select(input.value);
+        store.preferences ||= {}; store.preferences[recipeKey] ||= {}; store.preferences[recipeKey].choices ||= {};
+        store.preferences[recipeKey].choices[choice] = input.value; saveStore(); select(input.value);
       }));
     });
 
@@ -231,7 +260,7 @@
       });
     };
     const persistActive = () => {
-      const session = store.active[recipe.id]; if (!session) { progress(); return; }
+      const session = store.active[recipeKey]; if (!session) { progress(); return; }
       session.scale = scale; session.checks = {}; session.notes = {}; session.actuals = {};
       if (compoundYield) { session.yieldCount = Number(yieldCount.value); session.yieldEach = Number(yieldEach.value); }
       document.querySelectorAll("[data-check]").forEach(input => session.checks[`${input.dataset.check}:${input.dataset.key}`] = input.checked);
@@ -249,8 +278,8 @@
     };
     if (active) enterCook(active);
     document.querySelector('[data-action="start-cook"]').addEventListener("click", () => {
-      const session = store.active[recipe.id] || { id: uuid(), recipeId: recipe.id, recipeTitle: recipe.metadata.title, startedAt: new Date().toISOString(), scale, checks: {}, notes: {} };
-      store.active[recipe.id] = session; saveStore(); enterCook(session); toast("Cook started"); document.querySelector("#step-1")?.scrollIntoView();
+      const session = store.active[recipeKey] || { id: uuid(), recipeId: recipeKey, recipeTitle: recipe.variantTitle ? `${recipe.metadata.title} — ${recipe.variantTitle}` : recipe.metadata.title, startedAt: new Date().toISOString(), scale, checks: {}, notes: {} };
+      store.active[recipeKey] = session; saveStore(); enterCook(session); toast("Cook started"); document.querySelector("#step-1")?.scrollIntoView();
     });
     document.querySelectorAll("[data-check]").forEach(input => input.addEventListener("change", persistActive));
     const syncDependencyAncestors = source => {
@@ -303,16 +332,16 @@
     document.querySelector('[data-action="finish-cook"]').addEventListener("click", () => document.querySelector("#finish-dialog").showModal());
     document.querySelector('[data-action="discard-cook"]').addEventListener("click", () => {
       if (!confirm("Discard this cook? Checks, actual quantities, and notes from this session will be deleted.")) return;
-      delete store.active[recipe.id]; saveStore();
+      delete store.active[recipeKey]; saveStore();
       document.querySelectorAll("[data-check]").forEach(input => input.checked = false);
       document.querySelectorAll("[data-step-note],[data-actual]").forEach(input => input.value = "");
       document.querySelectorAll("[data-ratio-warning]").forEach(element => element.textContent = "");
       document.querySelector("#finish-dialog").close(); document.body.classList.remove("cooking"); document.querySelector("[data-progress-wrap]").hidden = true; progress(); toast("Cook discarded");
     });
     document.querySelector("[data-finish-form]").addEventListener("submit", event => {
-      event.preventDefault(); persistActive(); const form = new FormData(event.currentTarget); const session = store.active[recipe.id];
+      event.preventDefault(); persistActive(); const form = new FormData(event.currentTarget); const session = store.active[recipeKey];
       store.events.push({ ...session, id: session.id, completedAt: new Date().toISOString(), outcome: form.get("outcome"), summary: form.get("summary"), schema: 1 });
-      delete store.active[recipe.id]; saveStore(); renderHistory(); document.querySelector("#finish-dialog").close(); document.body.classList.remove("cooking"); document.querySelector("[data-progress-wrap]").hidden = true; toast("Cooking event saved");
+      delete store.active[recipeKey]; saveStore(); renderHistory(); document.querySelector("#finish-dialog").close(); document.body.classList.remove("cooking"); document.querySelector("[data-progress-wrap]").hidden = true; toast("Cooking event saved");
     });
     document.querySelectorAll(".annotation.timer").forEach(timer => timer.addEventListener("click", () => startTimer(timer)));
     function checkRatios() {
@@ -385,12 +414,19 @@
     search.addEventListener("input", filter); filter();
     const shoppingButton = document.querySelector('[data-action="open-shopping"]');
     if (!payload.recipes || !shoppingButton) return;
+    payload.recipes.forEach(recipe => {
+      const selectedVariant = store.preferences?.[recipe.id]?.variant;
+      const variant = recipe.variants?.find(item => item.id === selectedVariant);
+      const link = document.querySelector(`[data-recipe-link="${CSS.escape(recipe.id)}"]`);
+      if (link && variant && !variant.default) link.href = `recipes/${recipe.id}--${variant.id}.html`;
+    });
     const selected = new Set(); const updateCount = () => document.querySelector("[data-selected-count]").textContent = selected.size;
     document.querySelectorAll("[data-meal-recipe]").forEach(input => input.addEventListener("change", () => { input.checked ? selected.add(input.dataset.mealRecipe) : selected.delete(input.dataset.mealRecipe); updateCount(); }));
     let view = "merged";
     const renderShopping = () => {
       const recipes = payload.recipes.filter(recipe => selected.has(recipe.id)), groups = new Map();
       recipes.forEach(recipe => (recipe.shoppingIngredients || recipe.steps.flatMap(step => step.ingredients)).filter(item => {
+        if (item.variant && item.variant !== (store.preferences?.[recipe.id]?.variant || recipe.defaultVariant)) return false;
         if (!item.choice) return true;
         const selected = store.preferences?.[recipe.id]?.choices?.[item.choice];
         return selected ? item.option === selected : item.default;
@@ -438,7 +474,7 @@
     async function create() { const boundary = `julia_${Date.now()}`, metadata = JSON.stringify({ name: "julia-cookbook-v1.json", parents: ["appDataFolder"] }); const body = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(store)}\r\n--${boundary}--`; await api("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", { method:"POST", headers:{"Content-Type":`multipart/related; boundary=${boundary}`}, body }); }
     async function upload(id) { await api(`https://www.googleapis.com/upload/drive/v3/files/${id}?uploadType=media`, { method:"PATCH", headers:{"Content-Type":"application/json"}, body:JSON.stringify(store) }); }
   }
-  setupRecipe(); setupGuide(); setupFeastShopping(); setupIndex(); setupDrive().catch(() => {});
+  setupTheme(); setupRecipe(); setupGuide(); setupFeastShopping(); setupIndex(); setupDrive().catch(() => {});
   if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
     const page = document.documentElement.dataset.page;
     const prefix = page === "feast-shopping" ? "../../" : ["recipe","guide"].includes(page) ? "../" : "";

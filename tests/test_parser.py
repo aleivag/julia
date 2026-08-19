@@ -115,6 +115,56 @@ Mix @instant yeast{1%g} to produce =>yeast water{}.
             self.assertEqual(step.title, "prepare yeast")
             self.assertEqual(step.attributes, {"choice": "yeast", "option": "instant", "default": "true"})
 
+    def test_parses_variants_from_generic_includes(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            variants = root / "_variants"
+            variants.mkdir()
+            (variants / "buttermilk.md").write_text("""---
+title: Buttermilk
+yield: 4 pancakes
+source: First source
+---
+== step mix ==
+Whisk @buttermilk{150%g}.
+""", encoding="utf-8")
+            (variants / "jiggly.md").write_text("""---
+title: Jiggly soufflé
+yield: 1 serving
+source: Second source
+---
+== step whip ==
+Whip @egg whites{2}.
+""", encoding="utf-8")
+            recipe_path = root / "pancakes.md"
+            recipe_path.write_text("""---
+title: Japanese Fluffy Pancakes
+tags: [breakfast]
+---
+== variant buttermilk [default=true] ==
+@include{_variants/buttermilk.md}
+== variant jiggly ==
+@include{_variants/jiggly.md}
+""", encoding="utf-8")
+
+            recipe = parse_recipe(recipe_path)
+
+            self.assertEqual([variant.id for variant in recipe.variants], ["buttermilk", "jiggly"])
+            self.assertEqual([variant.default for variant in recipe.variants], [True, False])
+            self.assertEqual(recipe.metadata["yield"], "4 pancakes")
+            self.assertEqual(recipe.steps[0].ingredients[0].name, "buttermilk")
+            self.assertEqual(recipe.variants[1].metadata["yield"], "1 serving")
+            self.assertEqual(recipe.variants[1].steps[0].ingredients[0].source.path, str((variants / "jiggly.md").resolve()))
+
+    def test_reports_circular_include_chain(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "a.md").write_text("---\ntitle: A\n---\n@include{b.md}\n", encoding="utf-8")
+            (root / "b.md").write_text("@include{a.md}\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(RecipeSyntaxError, "circular include"):
+                parse_recipe(root / "a.md")
+
     def test_renders_ordered_and_unordered_lists(self) -> None:
         with TemporaryDirectory() as directory:
             path = Path(directory) / "lists.md"

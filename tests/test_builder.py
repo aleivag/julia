@@ -16,6 +16,55 @@ class BuilderTests(TestCase):
         self.assertEqual(_search_key("Crème Brûlée"), "creme brulee")
         self.assertEqual(_search_key("CRÈME"), "creme")
 
+    def test_builds_one_index_entry_with_variant_pages(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            recipe_dir = root / "recipes"
+            variant_dir = recipe_dir / "_variants"
+            variant_dir.mkdir(parents=True)
+            (root / ".julia").write_text('[site]\ntitle="Variants"\noutput="site"\n', encoding="utf-8")
+            (recipe_dir / "pancakes.md").write_text("""---
+title: Japanese Fluffy Pancakes
+tags: [pancakes]
+---
+== variant buttermilk [default=true] ==
+@include{_variants/buttermilk.md}
+== variant jiggly ==
+@include{_variants/jiggly.md}
+""", encoding="utf-8")
+            (variant_dir / "buttermilk.md").write_text("""---
+title: Buttermilk
+yield: 4 pancakes
+---
+== step mix ==
+Mix @buttermilk{150%g}.
+""", encoding="utf-8")
+            (variant_dir / "jiggly.md").write_text("""---
+title: Jiggly soufflé
+yield: 1 serving
+---
+== step whip ==
+Whip @egg whites{2}.
+""", encoding="utf-8")
+
+            output, recipes = build(root)
+
+            self.assertEqual([recipe.id for recipe in recipes], ["pancakes"])
+            index = (output / "index.html").read_text(encoding="utf-8")
+            self.assertEqual(index.count("Japanese Fluffy Pancakes</h2>"), 1)
+            default_page = (output / "recipes" / "pancakes.html").read_text(encoding="utf-8")
+            alternate_page = (output / "recipes" / "pancakes--jiggly.html").read_text(encoding="utf-8")
+            self.assertIn('class="recipe-variant-nav"', default_page)
+            self.assertIn('href="pancakes--jiggly.html"', default_page)
+            self.assertIn('"variant":"buttermilk"', default_page)
+            self.assertIn('"variant":"jiggly"', alternate_page)
+            payload = json.loads((output / "recipes.json").read_text(encoding="utf-8"))[0]
+            self.assertEqual(payload["defaultVariant"], "buttermilk")
+            self.assertEqual(
+                [(item["name"], item["variant"]) for item in payload["shoppingIngredients"]],
+                [("buttermilk", "buttermilk"), ("egg whites", "jiggly")],
+            )
+
     def test_builds_static_site(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)
@@ -53,6 +102,9 @@ class BuilderTests(TestCase):
             self.assertIn("https://www.instagram.com/cook/", html)
             self.assertIn('aria-label="Instagram"', html)
             self.assertIn('href="https://github.com/aleivag/julia"', html)
+            self.assertIn('data-theme-default="auto"', html)
+            self.assertIn('data-theme-select', html)
+            self.assertIn('<option value="editorial">Editorial</option>', html)
             scaling = (output / "recipes" / "scaling.html").read_text(encoding="utf-8")
             self.assertIn('data-anchor-original="5"', scaling)
             self.assertIn('data-anchor-original="6"', scaling)

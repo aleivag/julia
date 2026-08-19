@@ -21,6 +21,11 @@ timing charts.
 See [RECIPE_FORMAT.md](RECIPE_FORMAT.md) for the recipe language and `PLAN.md`
 for the broader product design.
 
+Alternate formulas for the same dish can share one collection entry through
+top-level `== variant name ==` sections. Generic `@include{relative/path.md}`
+directives let those variants—or any recipe source—live in smaller files without
+turning the included fragments into recipe dependencies.
+
 The generated collection is divided by content type:
 
 ```text
@@ -38,6 +43,7 @@ Cookbook identity is separate from the Julia framework:
 [site]
 title = "My Cookbook"
 unit_system = "international"
+theme = "auto"
 
 [author]
 name = "Your Name"
@@ -45,6 +51,12 @@ email = "you@example.com"
 website = "https://example.com"
 instagram = "@yourhandle"
 ```
+
+The screen theme can be changed from any generated page and is remembered on
+that device. Available values are `auto`, `nordic`, `night`, and `editorial`.
+`auto` follows the device's light/dark preference, choosing Nordic for light and
+Night for dark. Printing always uses the Editorial treatment regardless of the
+screen selection.
 
 ## Feasts
 

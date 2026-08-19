@@ -60,12 +60,13 @@ class Step:
 
 
 @dataclass(slots=True)
-class Recipe:
+class RecipeVariant:
     id: str
     metadata: dict[str, Any]
     steps: list[Step]
     path: str
     blurb_html: str = ""
+    default: bool = False
 
     @property
     def title(self) -> str:
@@ -73,12 +74,39 @@ class Recipe:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "id": self.id,
+            "metadata": self.metadata,
+            "blurbHtml": self.blurb_html,
+            "default": self.default,
+            "steps": [step.to_dict() for step in self.steps],
+        }
+
+
+@dataclass(slots=True)
+class Recipe:
+    id: str
+    metadata: dict[str, Any]
+    steps: list[Step]
+    path: str
+    blurb_html: str = ""
+    variants: list[RecipeVariant] = field(default_factory=list)
+    base_metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def title(self) -> str:
+        return str(self.metadata.get("title", self.id.replace("-", " ").title()))
+
+    def to_dict(self) -> dict[str, Any]:
+        value = {
             "schema": 1,
             "id": self.id,
             "metadata": self.metadata,
             "blurbHtml": self.blurb_html,
             "steps": [step.to_dict() for step in self.steps],
         }
+        if self.variants:
+            value["variants"] = [variant.to_dict() for variant in self.variants]
+        return value
 
 
 @dataclass(slots=True)

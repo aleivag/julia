@@ -487,6 +487,18 @@ steps carrying `[choice=name, option=value]` share one displayed step, and
 produce the same output contract; the selected branch controls Cook Mode and
 shopping ingredients.
 
+Whole-recipe variants are implemented as top-level
+`== variant name [default=true] ==` scopes. They share one collection entry but
+may provide independent yields, sources, steps, scaling, shopping data, and Cook
+Mode history. A generic `@include{relative/path.md}` directive performs parsed,
+build-time source composition inside the current recipe or variant scope. This
+is intentionally separate from `@recipe`, which remains the semantic construct
+for a reusable culinary dependency.
+
+The generated site provides selectable `auto`, `nordic`, `night`, and
+`editorial` presentation themes. Auto follows the device color scheme, the
+choice persists in local cookbook data, and print output always uses Editorial.
+
 ### Guides
 
 Guides are implemented as Markdown files in `guides/`. They provide searchable

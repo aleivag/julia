@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .dependencies import default_steps, dependency_scale, scaled_quantity, validate_step_products, walk_recipe
-from .models import Annotation, Guide, Recipe
+from .models import Annotation, Guide, Recipe, RecipeVariant
 from .parser import parse_recipe
 from .guides import parse_guide
 from .feasts import build_feasts
@@ -91,14 +91,18 @@ def _shell(title: str, content: str, site: dict[str, Any], page: str, data: dict
     recipes_current = ' aria-current="page"' if page in {"index", "recipe"} else ""
     guides_current = ' aria-current="page"' if page in {"guides", "guide"} else ""
     feasts_current = ' aria-current="page"' if page == "feasts" else ""
+    default_theme = str(site.get("theme", "auto")).lower()
+    if default_theme not in {"auto", "nordic", "night", "editorial"}:
+        raise ValueError("site.theme must be one of: auto, nordic, night, editorial")
     return f'''<!doctype html>
-<html lang="en" data-page="{page}">
+<html lang="en" data-page="{page}" data-theme-default="{escape(default_theme)}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#f7f3e8">
   <meta name="description" content="{escape(str(site.get('description', 'A local-first cookbook.')))}">
   <title>{escape(title)} | {site_title}</title>
+  <script>(function(){{try{{var r=document.documentElement,s=JSON.parse(localStorage.getItem("julia:cookbook:v1")||"{{}}"),t=s.preferences&&s.preferences.theme||r.dataset.themeDefault||"auto",m=matchMedia("(prefers-color-scheme: dark)"),e=t==="auto"?(m.matches?"night":"nordic"):t;r.dataset.theme=t;r.dataset.themeEffective=e;r.style.colorScheme=e==="night"?"dark":"light"}}catch(e){{}}}})();</script>
   <link rel="manifest" href="{prefix}manifest.webmanifest">
   <link rel="stylesheet" href="{prefix}assets/styles.css?v={asset_version}">
 </head>
@@ -110,6 +114,7 @@ def _shell(title: str, content: str, site: dict[str, Any], page: str, data: dict
       <a href="{prefix}index.html"{recipes_current}>Recipes</a>
       <a href="{prefix}guides/index.html"{guides_current}>Guides</a>
       <a href="{prefix}feasts/index.html"{feasts_current}>Feasts</a>
+      <label class="theme-picker"><span>Theme</span><select data-theme-select aria-label="Color theme"><option value="auto">Auto</option><option value="nordic">Nordic</option><option value="night">Night</option><option value="editorial">Editorial</option></select></label>
       <button class="icon-button" data-action="open-data" title="Data and sync" aria-label="Data and sync">&#8635;</button>
     </nav>
   </header>
@@ -291,6 +296,17 @@ def _step_groups(recipe: Recipe) -> list[list[Any]]:
     return groups
 
 
+def _variant_view(recipe: Recipe, variant: RecipeVariant) -> Recipe:
+    metadata = {**(recipe.base_metadata or recipe.metadata), **variant.metadata}
+    metadata["title"] = recipe.title
+    blurbs = [value for value in (recipe.blurb_html, variant.blurb_html) if value]
+    return Recipe(recipe.id, metadata, variant.steps, recipe.path, "".join(blurbs))
+
+
+def _variant_href(recipe: Recipe, variant: RecipeVariant) -> str:
+    return f"{recipe.id}.html" if variant.default else f"{recipe.id}--{variant.id}.html"
+
+
 def _choice_step(group: list[Any], display_number: int, recipes: dict[str, Recipe], recipe_id: str, ratio_base: Annotation | None = None) -> str:
     choice = group[0].attributes["choice"]
     default = next((step for step in group if step.attributes.get("default") == "true"), group[0])
@@ -343,7 +359,14 @@ def _choice_step(group: list[Any], display_number: int, recipes: dict[str, Recip
     </article>'''
 
 
-def _recipe_page(recipe: Recipe, recipes: dict[str, Recipe], site: dict[str, Any], sync: dict[str, Any]) -> str:
+def _recipe_page(
+    recipe: Recipe,
+    recipes: dict[str, Recipe],
+    site: dict[str, Any],
+    sync: dict[str, Any],
+    parent: Recipe | None = None,
+    selected_variant: RecipeVariant | None = None,
+) -> str:
     meta = recipe.metadata
     blurb_html = f'<section class="recipe-blurb">{recipe.blurb_html}</section>' if recipe.blurb_html else ""
     unit_system = str(meta.get("units", site.get("unit_system", "international"))).lower()
@@ -375,6 +398,13 @@ def _recipe_page(recipe: Recipe, recipes: dict[str, Recipe], site: dict[str, Any
             for target in variations
         )
         variation_html = f'<section class="variations"><h2>Variations</h2><ul>{variation_links}</ul></section>'
+    variant_nav = ""
+    if parent and selected_variant:
+        links = "".join(
+            f'<a href="{escape(_variant_href(parent, variant))}"{" aria-current=\"page\"" if variant.id == selected_variant.id else ""}>{escape(variant.title)}</a>'
+            for variant in parent.variants
+        )
+        variant_nav = f'<nav class="recipe-variant-nav" aria-label="Recipe variant"><span>Choose a style</span><div>{links}</div></nav>'
     steps = []
     yield_spec = parse_yield(str(meta.get("yield", "")))
     all_ingredients = [item for recipe_step in default_steps(recipe) for item in recipe_step.ingredients]
@@ -517,10 +547,18 @@ def _recipe_page(recipe: Recipe, recipes: dict[str, Recipe], site: dict[str, Any
     scale_panel = f'''<details class="scale-panel"><summary><span>Scale &amp; units</span><strong data-scale-summary>Original</strong></summary><div class="scale-panel-body">{formula_control}{compound_control}{anchor_control}<label class="quick-scale"><span>Quick scale</span><select data-scale><option value="0.5">Half</option><option value="1" selected>Original</option><option value="1.5">1.5x</option><option value="2">Double</option><option value="3">Triple</option><option value="custom" hidden>Custom</option></select></label><fieldset class="unit-system"><legend>Units</legend><div role="group" aria-label="Measurement units"><button type="button" data-unit-system="international">International</button><button type="button" data-unit-system="imperial">Imperial</button></div></fieldset></div></details>'''
     content = f'''<header class="recipe-hero"><div><p class="eyebrow">Recipe</p><h1>{escape(recipe.title)}</h1><p class="recipe-yield">Makes <strong>{yield_text}</strong></p>{source}<div class="tag-list">{tags}</div></div>
       {relationship_html}<div class="recipe-actions"><button class="primary" data-action="start-cook">Make this recipe</button><a class="source-button" href="../sources/{recipe.id}.html">Show source</a></div></header>
-      <div class="progress-wrap" hidden data-progress-wrap><div><span data-progress-text>0 of {len(step_groups)} steps</span><button class="text-button" data-action="finish-cook">Finish cook</button></div><progress max="{len(step_groups)}" value="0" data-progress></progress></div>
+      {variant_nav}<div class="progress-wrap" hidden data-progress-wrap><div><span data-progress-text>0 of {len(step_groups)} steps</span><button class="text-button" data-action="finish-cook">Finish cook</button></div><progress max="{len(step_groups)}" value="0" data-progress></progress></div>
       <section class="recipe-body">{blurb_html}{scale_panel}{''.join(steps)}{variation_html}<section class="cook-history"><p class="eyebrow">Cook log</p><h2>Past experiments</h2><div data-cook-history><p class="muted">No completed cooks on this device yet.</p></div></section></section>
       <dialog id="finish-dialog" class="finish-dialog"><form method="dialog" data-finish-form><div class="dialog-head"><h2>Finish this cook</h2><button class="icon-button" value="cancel" aria-label="Close">&times;</button></div><label>Outcome<select name="outcome"><option value="worked">Worked well</option><option value="change">Would change</option><option value="failed">Did not work</option></select></label><label>Summary<textarea name="summary" placeholder="What will you remember next time?"></textarea></label><div class="button-row"><button class="primary" value="default">Save cooking event</button><button type="button" class="secondary danger" data-action="discard-cook">Discard cook</button></div></form></dialog>'''
-    data = {"recipe": recipe.to_dict(), "units": unit_system, "sync": {"googleClientId": sync.get("google_client_id", "")}}
+    recipe_data = recipe.to_dict()
+    if parent and selected_variant:
+        recipe_data.update({
+            "parentId": parent.id,
+            "variant": selected_variant.id,
+            "variantTitle": selected_variant.title,
+            "storageId": f"{parent.id}@{selected_variant.id}",
+        })
+    data = {"recipe": recipe_data, "units": unit_system, "sync": {"googleClientId": sync.get("google_client_id", "")}}
     return _shell(recipe.title, content, site, "recipe", data)
 
 
@@ -537,20 +575,28 @@ def _recipe_payloads(recipes: list[Recipe]) -> list[dict[str, Any]]:
     for recipe in recipes:
         payload = recipe.to_dict()
         shopping_ingredients = []
-        for expanded, scale in walk_recipe(recipe, 1.0, recipe_map):
-            for step in expanded.steps:
-                for ingredient in step.ingredients:
-                    item = ingredient.to_dict()
-                    item["quantity"] = scaled_quantity(ingredient.quantity, scale)
-                    item["sourceId"] = expanded.id
-                    item["sourceTitle"] = expanded.title
-                    item["component"] = step.title
-                    if step.attributes.get("choice"):
-                        item["choice"] = step.attributes["choice"]
-                        item["option"] = step.attributes.get("option", "")
-                        item["default"] = step.attributes.get("default") == "true"
-                    shopping_ingredients.append(item)
+        views = [(None, recipe)] if not recipe.variants else [
+            (variant, _variant_view(recipe, variant)) for variant in recipe.variants
+        ]
+        for variant, view in views:
+            for expanded, scale in walk_recipe(view, 1.0, recipe_map):
+                for step in expanded.steps:
+                    for ingredient in step.ingredients:
+                        item = ingredient.to_dict()
+                        item["quantity"] = scaled_quantity(ingredient.quantity, scale)
+                        item["sourceId"] = expanded.id
+                        item["sourceTitle"] = expanded.title
+                        item["component"] = step.title
+                        if variant and expanded.id == recipe.id:
+                            item["variant"] = variant.id
+                        if step.attributes.get("choice"):
+                            item["choice"] = step.attributes["choice"]
+                            item["option"] = step.attributes.get("option", "")
+                            item["default"] = step.attributes.get("default") == "true"
+                        shopping_ingredients.append(item)
         payload["shoppingIngredients"] = shopping_ingredients
+        if recipe.variants:
+            payload["defaultVariant"] = next(variant.id for variant in recipe.variants if variant.default)
         payloads.append(payload)
     return payloads
 
@@ -584,7 +630,7 @@ def _index_page(
         headnote = str(recipe.metadata.get("headnote") or recipe.metadata.get("description") or recipe.metadata.get("yield", "Flexible yield"))
         cards.append(f'''<article class="recipe-card" data-search="{escape(_search_key(recipe.title + ' ' + tags + ' ' + family))}" data-tags="{escape(_search_key(tags + ' ' + family))}">
           <label class="select-recipe"><input type="checkbox" data-meal-recipe="{recipe.id}" aria-label="Add {escape(recipe.title)} to shopping list"></label>
-          <a href="recipes/{recipe.id}.html"><p class="eyebrow">{len(recipe.steps)} steps &middot; {ingredient_count} ingredients</p><h2>{escape(recipe.title)}</h2><p>{escape(headnote)}</p><div class="tag-list">{''.join(f'<span>{escape(str(tag))}</span>' for tag in recipe.metadata.get('tags', []))}</div></a>
+          <a href="recipes/{recipe.id}.html" data-recipe-link="{recipe.id}"><p class="eyebrow">{len(recipe.steps)} steps &middot; {ingredient_count} ingredients</p><h2>{escape(recipe.title)}</h2><p>{escape(headnote)}</p><div class="tag-list">{''.join(f'<span>{escape(str(tag))}</span>' for tag in recipe.metadata.get('tags', []))}</div></a>
         </article>''')
     content = f'''<section class="library-head"><div><p class="eyebrow">Recipes</p><h1>{escape(str(site.get('title', 'My Cookbook')))}</h1><p>{escape(str(site.get('description', 'Recipes tested, adjusted, and kept.')))}</p></div><div class="library-tools"><label class="search"><span class="sr-only">Search recipes</span><input type="search" data-search placeholder="Search recipes"></label><button data-action="open-shopping">Shopping list <span data-selected-count>0</span></button></div></section>
       <section class="recipe-grid" aria-label="Recipes">{''.join(cards)}</section><p class="empty-state" hidden data-empty>No recipes match your search.</p>
@@ -631,14 +677,20 @@ def build(root: str | Path = ".") -> tuple[Path, list[Recipe]]:
     guide_dir = root_path / "guides"
     guides = sorted((parse_guide(path) for path in guide_dir.glob("*.md")), key=lambda item: item.title.lower()) if guide_dir.is_dir() else []
     for recipe in recipes:
-        validate_step_products(recipe)
+        views = [recipe] if not recipe.variants else [_variant_view(recipe, variant) for variant in recipe.variants]
+        for view in views:
+            validate_step_products(view)
     recipe_map = {recipe.id: recipe for recipe in recipes}
     recipe_ids = {recipe.id for recipe in recipes}
     for recipe in recipes:
-        for step in recipe.steps:
-            for reference in step.subrecipes:
-                if reference.name not in recipe_ids:
-                    raise ValueError(f"{recipe.path}:{step.line}: unknown subrecipe '{reference.name}'")
+        views = [recipe] if not recipe.variants else [_variant_view(recipe, variant) for variant in recipe.variants]
+        for view in views:
+            for step in view.steps:
+                for reference in step.subrecipes:
+                    if reference.name not in recipe_ids:
+                        path = reference.source.path if reference.source else recipe.path
+                        line = reference.source.line if reference.source else step.line
+                        raise ValueError(f"{path}:{line}: unknown subrecipe '{reference.name}'")
     recipe_payloads = _recipe_payloads(recipes)
     output = root_path / str(site.get("output", "build"))
     (output / "recipes").mkdir(parents=True, exist_ok=True)
@@ -653,11 +705,18 @@ def build(root: str | Path = ".") -> tuple[Path, list[Recipe]]:
     for stale in (output / "sources").glob("*.html"):
         stale.unlink()
     for recipe in recipes:
-        (output / "recipes" / f"{recipe.id}.html").write_text(_recipe_page(recipe, recipe_map, site, sync), encoding="utf-8")
+        if recipe.variants:
+            for variant in recipe.variants:
+                view = _variant_view(recipe, variant)
+                (output / "recipes" / _variant_href(recipe, variant)).write_text(
+                    _recipe_page(view, recipe_map, site, sync, recipe, variant), encoding="utf-8"
+                )
+        else:
+            (output / "recipes" / f"{recipe.id}.html").write_text(_recipe_page(recipe, recipe_map, site, sync), encoding="utf-8")
         (output / "sources" / f"{recipe.id}.html").write_text(_source_page(recipe, site, sync), encoding="utf-8")
     for guide in guides:
         (output / "guides" / f"{guide.id}.html").write_text(_guide_page(guide, site, sync), encoding="utf-8")
-    feasts = build_feasts(root_path, output, recipes)
+    feasts = build_feasts(root_path, output, recipes, str(site.get("theme", "auto")).lower())
     (output / "index.html").write_text(_index_page(recipes, recipe_payloads, site, sync), encoding="utf-8")
     (output / "guides" / "index.html").write_text(_guides_index_page(guides, site, sync), encoding="utf-8")
     (output / "feasts" / "index.html").write_text(_feasts_index_page(feasts, site, sync), encoding="utf-8")

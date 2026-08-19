@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import html
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from .models import Annotation, Recipe, RecipeSyntaxError, SourceLocation, Step
+from .models import Annotation, Recipe, RecipeSyntaxError, RecipeVariant, SourceLocation, Step
 
 STEP_RE = re.compile(r"^==\s*step(?:\s+(.+?))?\s*==$", re.IGNORECASE)
+VARIANT_RE = re.compile(r"^==\s*variant\s+(.+?)\s*==$", re.IGNORECASE)
 POSSIBLE_STEP_RE = re.compile(r"^==.*==$")
+INCLUDE_RE = re.compile(r"^\s*@include\{([^}]+)\}\s*$", re.IGNORECASE)
 SLUG_RE = re.compile(r"[^a-z0-9]+")
 YOUTUBE_ID_RE = re.compile(r"[A-Za-z0-9_-]{11}")
 YOUTUBE_OPTIONS = {"start", "end", "autoplay", "mute", "loop", "controls", "captions", "title"}
@@ -32,14 +35,30 @@ def _scalar(value: str) -> Any:
     return value.strip("\"'")
 
 
-def _frontmatter(lines: list[str], path: str) -> tuple[dict[str, Any], int]:
+@dataclass(slots=True)
+class _SourceLine:
+    path: str
+    line: int
+    text: str
+
+
+@dataclass(slots=True)
+class _IncludedMetadata:
+    path: str
+    line: int
+    values: dict[str, Any]
+
+
+def _frontmatter(lines: list[str], path: str, require_title: bool = True) -> tuple[dict[str, Any], int]:
     if not lines or lines[0].strip() != "---":
-        raise RecipeSyntaxError(path, 1, "recipe is missing YAML frontmatter", "Start the file with --- and include a title.")
+        if require_title:
+            raise RecipeSyntaxError(path, 1, "recipe is missing YAML frontmatter", "Start the file with --- and include a title.")
+        return {}, 0
     metadata: dict[str, Any] = {}
     for index in range(1, len(lines)):
         line = lines[index]
         if line.strip() == "---":
-            if "title" not in metadata:
+            if require_title and "title" not in metadata:
                 raise RecipeSyntaxError(path, 1, "frontmatter is missing 'title'")
             return metadata, index + 1
         if not line.strip() or line.lstrip().startswith("#"):
@@ -49,6 +68,38 @@ def _frontmatter(lines: list[str], path: str) -> tuple[dict[str, Any], int]:
         key, value = line.split(":", 1)
         metadata[key.strip()] = _scalar(value)
     raise RecipeSyntaxError(path, 1, "frontmatter is not closed", "Add --- after the metadata.")
+
+
+def _expanded_document(
+    source: Path,
+    require_title: bool,
+    trail: tuple[Path, ...] = (),
+) -> tuple[dict[str, Any], list[_SourceLine | _IncludedMetadata]]:
+    resolved = source.resolve()
+    if resolved in trail:
+        chain = " -> ".join(str(path) for path in (*trail, resolved))
+        raise RecipeSyntaxError(str(source), 1, f"circular include: {chain}")
+    if not resolved.is_file():
+        raise RecipeSyntaxError(str(source), 1, "included file does not exist")
+    lines = resolved.read_text(encoding="utf-8").splitlines()
+    metadata, body_start = _frontmatter(lines, str(resolved), require_title=require_title)
+    entries: list[_SourceLine | _IncludedMetadata] = []
+    for index in range(body_start, len(lines)):
+        raw = lines[index]
+        include = INCLUDE_RE.fullmatch(raw)
+        if include:
+            include_path = (resolved.parent / include.group(1).strip()).resolve()
+            if not include_path.is_file():
+                raise RecipeSyntaxError(str(resolved), index + 1, f"included file not found: {include.group(1).strip()}")
+            child_metadata, child_entries = _expanded_document(include_path, False, (*trail, resolved))
+            if child_metadata:
+                entries.append(_IncludedMetadata(str(include_path), 1, child_metadata))
+            entries.extend(child_entries)
+            continue
+        if "@include{" in raw.lower():
+            raise RecipeSyntaxError(str(resolved), index + 1, "include must appear on its own line", "Use @include{relative/path.md}.")
+        entries.append(_SourceLine(str(resolved), index + 1, raw))
+    return metadata, entries
 
 
 def _balanced(text: str, start: int, opening: str, closing: str, path: str, line: int) -> tuple[str, int]:
@@ -252,10 +303,10 @@ def _render_inline(raw: str, annotations: list[Annotation], path: str, line: int
     return "".join(output)
 
 
-def _parse_step(raw_lines: list[tuple[int, str]], title: str, attributes: dict[str, str], step_id: str, path: str) -> Step:
-    groups: list[list[tuple[int, str]]] = [[]]
+def _parse_step(raw_lines: list[_SourceLine], title: str, attributes: dict[str, str], step_id: str, path: str) -> Step:
+    groups: list[list[_SourceLine]] = [[]]
     for item in raw_lines:
-        if not item[1].strip():
+        if not item.text.strip():
             if groups[-1]:
                 groups.append([])
         else:
@@ -264,30 +315,30 @@ def _parse_step(raw_lines: list[tuple[int, str]], title: str, attributes: dict[s
     annotations: list[Annotation] = []
     paragraphs = []
     for group in groups:
-        first_marker = re.match(r"^\s*(?:(\d+)\.|([-+*]))\s+(.+)$", group[0][1])
+        first_marker = re.match(r"^\s*(?:(\d+)\.|([-+*]))\s+(.+)$", group[0].text)
         if first_marker:
             ordered = bool(first_marker.group(1))
-            items: list[list[tuple[int, str]]] = []
-            for number, text in group:
-                marker = re.match(r"^\s*(?:(\d+)\.|([-+*]))\s+(.+)$", text)
+            items: list[list[_SourceLine]] = []
+            for source_line in group:
+                marker = re.match(r"^\s*(?:(\d+)\.|([-+*]))\s+(.+)$", source_line.text)
                 if marker and bool(marker.group(1)) == ordered:
-                    items.append([(number, marker.group(3))])
+                    items.append([_SourceLine(source_line.path, source_line.line, marker.group(3))])
                 elif items:
-                    items[-1].append((number, text.strip()))
+                    items[-1].append(_SourceLine(source_line.path, source_line.line, source_line.text.strip()))
             rendered_items = []
             for item in items:
-                rendered = [_render_inline(text, annotations, path, number) for number, text in item]
+                rendered = [_render_inline(source_line.text, annotations, source_line.path, source_line.line) for source_line in item]
                 rendered_items.append(f"<li>{' '.join(rendered)}</li>")
             tag = "ol" if ordered else "ul"
             start = f' start="{first_marker.group(1)}"' if ordered and first_marker.group(1) != "1" else ""
             paragraphs.append(f"<{tag}{start}>{''.join(rendered_items)}</{tag}>")
         else:
-            rendered = [_render_inline(text, annotations, path, number) for number, text in group]
+            rendered = [_render_inline(source_line.text, annotations, source_line.path, source_line.line) for source_line in group]
             paragraphs.append(f"<p>{' '.join(rendered)}</p>")
     return Step(
         id=step_id,
         title=title,
-        markdown="\n".join(text for _, text in raw_lines).strip(),
+        markdown="\n".join(source_line.text for source_line in raw_lines).strip(),
         html="\n".join(paragraphs),
         attributes=attributes,
         ingredients=[a for a in annotations if a.kind == "ingredient"],
@@ -297,31 +348,67 @@ def _parse_step(raw_lines: list[tuple[int, str]], title: str, attributes: dict[s
         timers=[a for a in annotations if a.kind == "timer"],
         parameters=[a for a in annotations if a.kind == "parameter"],
         subrecipes=[a for a in annotations if a.kind == "subrecipe"],
-        line=raw_lines[0][0] if raw_lines else 1,
+        line=raw_lines[0].line if raw_lines else 1,
     )
 
 
 def parse_recipe(path: str | Path) -> Recipe:
     source = Path(path)
-    text = source.read_text(encoding="utf-8")
-    lines = text.splitlines()
-    metadata, body_start = _frontmatter(lines, str(source))
+    metadata, entries = _expanded_document(source, True)
     steps: list[Step] = []
     current_title = ""
     current_attributes: dict[str, str] = {}
-    current_lines: list[tuple[int, str]] = []
-    blurb_lines: list[tuple[int, str]] = []
+    current_lines: list[_SourceLine] = []
+    blurb_lines: list[_SourceLine] = []
     marker_seen = False
+    variants: list[dict[str, Any]] = []
+    current_variant: dict[str, Any] | None = None
 
     def finish() -> None:
         nonlocal current_lines
         if current_lines:
-            number = len(steps) + 1
-            steps.append(_parse_step(current_lines, current_title, current_attributes, f"step-{number}", str(source)))
+            target = current_variant["steps"] if current_variant else steps
+            number = len(target) + 1
+            target.append(_parse_step(current_lines, current_title, current_attributes, f"step-{number}", str(source)))
             current_lines = []
 
-    for index in range(body_start, len(lines)):
-        raw = lines[index]
+    for entry in entries:
+        if isinstance(entry, _IncludedMetadata):
+            target_metadata = current_variant["metadata"] if current_variant else metadata
+            for key, value in entry.values.items():
+                target_metadata.setdefault(key, value)
+            continue
+        raw = entry.text
+        variant_match = VARIANT_RE.match(raw.strip())
+        if variant_match:
+            finish()
+            if steps:
+                raise RecipeSyntaxError(entry.path, entry.line, "variants cannot follow ordinary recipe steps", "Put all steps inside variant sections.")
+            raw_variant = variant_match.group(1).strip()
+            attribute_match = re.fullmatch(r"(.*?)(?:\s+\[([^\]]+)\])?", raw_variant)
+            name = (attribute_match.group(1) if attribute_match else raw_variant).strip()
+            attributes = _attributes(attribute_match.group(2)) if attribute_match and attribute_match.group(2) else {}
+            variant_id = slugify(name)
+            if not variant_id:
+                raise RecipeSyntaxError(entry.path, entry.line, "variant name is empty")
+            if any(item["id"] == variant_id for item in variants):
+                raise RecipeSyntaxError(entry.path, entry.line, f"duplicate variant '{variant_id}'")
+            current_variant = {
+                "id": variant_id,
+                "name": name,
+                "metadata": {key: value for key, value in attributes.items() if key != "default"},
+                "default": attributes.get("default") == "true",
+                "steps": [],
+                "blurb": [],
+                "marker_seen": False,
+                "path": entry.path,
+            }
+            variants.append(current_variant)
+            current_title = ""
+            current_attributes = {}
+            current_lines = []
+            marker_seen = True
+            continue
         match = STEP_RE.match(raw.strip())
         if match:
             finish()
@@ -330,15 +417,41 @@ def parse_recipe(path: str | Path) -> Recipe:
             current_title = (attribute_match.group(1) if attribute_match else raw_title).strip()
             current_attributes = _attributes(attribute_match.group(2)) if attribute_match and attribute_match.group(2) else {}
             marker_seen = True
+            if current_variant:
+                current_variant["marker_seen"] = True
             continue
         if POSSIBLE_STEP_RE.match(raw.strip()):
-            raise RecipeSyntaxError(str(source), index + 1, f'unknown step marker "{raw.strip()}"', 'Use "== step ==" or "== step name ==".')
-        if not marker_seen:
-            blurb_lines.append((index + 1, raw))
+            raise RecipeSyntaxError(entry.path, entry.line, f'unknown step marker "{raw.strip()}"', 'Use "== step name ==" or "== variant name ==".')
+        if current_variant and not current_variant["marker_seen"]:
+            current_variant["blurb"].append(entry)
             continue
-        current_lines.append((index + 1, raw))
+        if not marker_seen:
+            blurb_lines.append(entry)
+            continue
+        current_lines.append(entry)
     finish()
+    recipe_variants: list[RecipeVariant] = []
+    base_metadata = dict(metadata)
+    if variants:
+        defaults = [item for item in variants if item["default"]]
+        if len(defaults) > 1:
+            raise RecipeSyntaxError(str(source), 1, "recipe has more than one default variant")
+        default_state = defaults[0] if defaults else variants[0]
+        default_state["default"] = True
+        for item in variants:
+            if not item["steps"]:
+                raise RecipeSyntaxError(item["path"], 1, f"variant '{item['id']}' contains no steps")
+            item["metadata"].setdefault("title", item["name"].replace("-", " ").title())
+            variant_blurb = _parse_step(item["blurb"], "", {}, "blurb", item["path"]).html if any(line.text.strip() for line in item["blurb"]) else ""
+            recipe_variants.append(RecipeVariant(
+                item["id"], item["metadata"], item["steps"], item["path"], variant_blurb, item["default"]
+            ))
+        default_variant = next(item for item in recipe_variants if item.default)
+        steps = default_variant.steps
+        effective_metadata = {**metadata, **default_variant.metadata}
+        effective_metadata["title"] = metadata["title"]
+        metadata = effective_metadata
     if not steps:
-        raise RecipeSyntaxError(str(source), body_start + 1, "recipe contains no steps")
-    blurb_html = _parse_step(blurb_lines, "", {}, "blurb", str(source)).html if any(text.strip() for _, text in blurb_lines) else ""
-    return Recipe(slugify(source.stem), metadata, steps, str(source), blurb_html)
+        raise RecipeSyntaxError(str(source), 1, "recipe contains no steps")
+    blurb_html = _parse_step(blurb_lines, "", {}, "blurb", str(source)).html if any(line.text.strip() for line in blurb_lines) else ""
+    return Recipe(slugify(source.stem), metadata, steps, str(source), blurb_html, recipe_variants, base_metadata)

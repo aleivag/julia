@@ -116,16 +116,18 @@ def validate_step_products(recipe: Recipe) -> None:
                 key = item.name.casefold()
                 if key not in produced:
                     line = item.source.line if item.source else branch.line
+                    path = item.source.path if item.source else recipe.path
                     raise ValueError(
-                        f"{recipe.path}:{line}: step input '{item.name}' has no output from an earlier step"
+                        f"{path}:{line}: step input '{item.name}' has no output from an earlier step"
                     )
         for item in group[0].outputs:
             key = item.name.casefold()
             if key in produced:
                 previous, _ = produced[key]
                 line = item.source.line if item.source else step.line
+                path = item.source.path if item.source else recipe.path
                 raise ValueError(
-                    f"{recipe.path}:{line}: step output '{item.name}' was already produced by step {previous}"
+                    f"{path}:{line}: step output '{item.name}' was already produced by step {previous}"
                 )
             produced[key] = (display_index, step.title)
         index += len(group)

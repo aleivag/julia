@@ -58,6 +58,60 @@ Do something with a descriptive component name.
 The filename becomes the recipe slug: `croque_monsieur.md` becomes
 `croque-monsieur`.
 
+## Recipe variants and source includes
+
+Use top-level variant sections when multiple formulas are alternate versions of
+the same dish rather than independent cookbook entries:
+
+```markdown
+---
+title: Japanese Fluffy Pancakes
+tags: [breakfast, pancakes, japanese]
+---
+
+== variant buttermilk [default=true] ==
+@include{_variants/fluffy_pancakes/buttermilk.md}
+
+== variant jiggly ==
+@include{_variants/fluffy_pancakes/jiggly.md}
+```
+
+Steps following a variant marker belong to that variant until the next variant
+marker. One variant may use `[default=true]`; otherwise the first variant is the
+default. Julia produces one collection card and a style switcher on the recipe
+page. Each variant keeps its own yield, source, steps, scaling state, shopping
+ingredients, and Cook Mode history. Feasts and recipe dependencies use the
+default variant.
+
+`@include{path}` is a generic build-time source include and must appear on its
+own line. Paths resolve relative to the file containing the include. The
+included body is parsed at that location, so it inherits the active recipe or
+variant scope. Optional included frontmatter fills metadata that is not already
+defined in that scope:
+
+```markdown
+---
+title: Jiggly Soufflé
+yield: 1 serving
+source: Example source
+source_url: https://example.com/pancakes
+---
+
+== step make meringue ==
+Whip @egg whites{2} with @sugar{26%g}.
+```
+
+Includes may be nested; missing files and circular include chains are build
+errors. Put non-public fragments in a nested directory such as
+`recipes/_variants/`. Julia discovers public recipes from top-level
+`recipes/*.md` files, so nested fragments do not create collection cards.
+
+`@include` and `@recipe` have deliberately different meanings:
+
+- `@include` organizes source files and becomes part of the current recipe.
+- `@recipe` is a culinary dependency with its own recipe identity, shopping
+  expansion, and collapsible preparation steps.
+
 ### Compound yields
 
 Portioned recipes can describe count and unit weight in the single `yield`

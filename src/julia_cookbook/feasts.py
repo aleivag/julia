@@ -113,7 +113,11 @@ def render_menu(feast: Feast, recipes: dict[str, Recipe], stylesheet: str = "../
     return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{escape(feast.title)} · Menu</title><link rel="stylesheet" href="{stylesheet}"></head><body class="feast-page"><main class="print-menu"><header><p class="eyebrow">Menu</p><h1>{escape(feast.title)}</h1>{f'<p class="feast-details">{escape(details)}</p>' if details else ''}{f'<p class="feast-headnote">{escape(feast.headnote)}</p>' if feast.headnote else ''}</header>{''.join(courses)}</main></body></html>'''
 
 
-def render_feast(feast: Feast, recipes: dict[str, Recipe]) -> str:
+def _theme_bootstrap(default_theme: str) -> str:
+    return f'''<script>(function(){{try{{var r=document.documentElement,s=JSON.parse(localStorage.getItem("julia:cookbook:v1")||"{{}}"),t=s.preferences&&s.preferences.theme||r.dataset.themeDefault||"auto",m=matchMedia("(prefers-color-scheme: dark)"),e=t==="auto"?(m.matches?"night":"nordic"):t;r.dataset.theme=t;r.dataset.themeEffective=e;r.style.colorScheme=e==="night"?"dark":"light"}}catch(e){{}}}})();</script>'''
+
+
+def render_feast(feast: Feast, recipes: dict[str, Recipe], default_theme: str = "auto") -> str:
     courses = []
     for course, dishes in _grouped_dishes(feast):
         items = "".join(
@@ -123,10 +127,10 @@ def render_feast(feast: Feast, recipes: dict[str, Recipe]) -> str:
         courses.append(f'<section class="feast-course"><h2>{escape(course)}</h2><ol>{items}</ol></section>')
     details = " · ".join(item for item in (feast.date, feast.time, feast.location) if item)
     payload = json.dumps({"feast": feast.id})
-    return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{escape(feast.title)}</title><link rel="stylesheet" href="../../assets/styles.css"></head><body class="feast-page"><header class="site-header"><a class="brand" href="../../index.html">Cookbook</a><nav><a href="../../index.html">Recipes</a><a href="../../guides/index.html">Guides</a><a href="../index.html" aria-current="page">Feasts</a></nav></header><main class="feast-main"><nav class="feast-actions" aria-label="Feast documents"><a href="menu.html">Print menu</a><a href="shopping.html">Shopping list</a><a href="booklet.html">Kitchen booklet</a></nav><header class="feast-hero"><p class="eyebrow">Feast</p><h1>{escape(feast.title)}</h1>{f'<p class="feast-details">{escape(details)}</p>' if details else ''}{f'<p class="feast-headnote">{escape(feast.headnote)}</p>' if feast.headnote else ''}</header>{''.join(courses)}</main><script type="application/json" id="julia-data">{payload}</script></body></html>'''
+    return f'''<!doctype html><html lang="en" data-theme-default="{escape(default_theme)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#f5f7f8"><title>{escape(feast.title)}</title>{_theme_bootstrap(default_theme)}<link rel="stylesheet" href="../../assets/styles.css"></head><body class="feast-page"><header class="site-header"><a class="brand" href="../../index.html">Cookbook</a><nav><a href="../../index.html">Recipes</a><a href="../../guides/index.html">Guides</a><a href="../index.html" aria-current="page">Feasts</a><label class="theme-picker"><span>Theme</span><select data-theme-select aria-label="Color theme"><option value="auto">Auto</option><option value="nordic">Nordic</option><option value="night">Night</option><option value="editorial">Editorial</option></select></label></nav></header><main class="feast-main"><nav class="feast-actions" aria-label="Feast documents"><a href="menu.html">Print menu</a><a href="shopping.html">Shopping list</a><a href="booklet.html">Kitchen booklet</a></nav><header class="feast-hero"><p class="eyebrow">Feast</p><h1>{escape(feast.title)}</h1>{f'<p class="feast-details">{escape(details)}</p>' if details else ''}{f'<p class="feast-headnote">{escape(feast.headnote)}</p>' if feast.headnote else ''}</header>{''.join(courses)}</main><script type="application/json" id="julia-data">{payload}</script><script src="../../assets/app.js" defer></script></body></html>'''
 
 
-def render_shopping(feast: Feast, recipes: dict[str, Recipe]) -> str:
+def render_shopping(feast: Feast, recipes: dict[str, Recipe], default_theme: str = "auto") -> str:
     rows = []
     for dish in feast.dishes:
         recipe = recipes.get(dish.recipe)
@@ -162,7 +166,7 @@ def render_shopping(feast: Feast, recipes: dict[str, Recipe]) -> str:
     missing = [dish for dish in feast.dishes if dish.recipe and dish.recipe not in recipes or not dish.recipe]
     missing_html = "" if not missing else '<section class="shopping-missing"><h2>Recipes still needed</h2><ul>' + "".join(f'<li>{escape(_dish_name(dish, recipes))}</li>' for dish in missing) + "</ul></section>"
     payload = json.dumps({"feastShopping": {"id": feast.id}}, separators=(",", ":"))
-    return f'''<!doctype html><html lang="en" data-page="feast-shopping"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{escape(feast.title)} · Shopping</title><link rel="stylesheet" href="../../assets/styles.css"></head><body class="feast-page"><main class="feast-document"><a href="index.html">Back to feast</a><h1>{escape(feast.title)}</h1><h2>Shopping list</h2><p class="muted">Checked items stay checked on this device.</p><ul class="feast-shopping">{items}</ul>{missing_html}</main><script type="application/json" id="julia-data">{payload}</script><script src="../../assets/app.js" defer></script></body></html>'''
+    return f'''<!doctype html><html lang="en" data-page="feast-shopping" data-theme-default="{escape(default_theme)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#f5f7f8"><title>{escape(feast.title)} · Shopping</title>{_theme_bootstrap(default_theme)}<link rel="stylesheet" href="../../assets/styles.css"></head><body class="feast-page"><main class="feast-document"><a href="index.html">Back to feast</a><h1>{escape(feast.title)}</h1><h2>Shopping list</h2><p class="muted">Checked items stay checked on this device.</p><ul class="feast-shopping">{items}</ul>{missing_html}</main><script type="application/json" id="julia-data">{payload}</script><script src="../../assets/app.js" defer></script></body></html>'''
 
 
 def render_booklet(feast: Feast, recipes: dict[str, Recipe]) -> str:
@@ -181,7 +185,7 @@ def render_booklet(feast: Feast, recipes: dict[str, Recipe]) -> str:
     return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{escape(feast.title)} · Kitchen Booklet</title><link rel="stylesheet" href="../../assets/styles.css"></head><body class="feast-page"><main class="feast-document"><a href="index.html">Back to feast</a><h1>{escape(feast.title)}</h1><p>Kitchen booklet</p>{''.join(sections)}</main></body></html>'''
 
 
-def build_feasts(root: Path, output: Path, recipes: list[Recipe]) -> list[Feast]:
+def build_feasts(root: Path, output: Path, recipes: list[Recipe], default_theme: str = "auto") -> list[Feast]:
     feast_dir = root / "feasts"
     if not feast_dir.is_dir():
         return []
@@ -190,8 +194,8 @@ def build_feasts(root: Path, output: Path, recipes: list[Recipe]) -> list[Feast]
     for feast in feasts:
         target = output / "feasts" / feast.id
         target.mkdir(parents=True, exist_ok=True)
-        (target / "index.html").write_text(render_feast(feast, recipe_map), encoding="utf-8")
+        (target / "index.html").write_text(render_feast(feast, recipe_map, default_theme), encoding="utf-8")
         (target / "menu.html").write_text(render_menu(feast, recipe_map), encoding="utf-8")
-        (target / "shopping.html").write_text(render_shopping(feast, recipe_map), encoding="utf-8")
+        (target / "shopping.html").write_text(render_shopping(feast, recipe_map, default_theme), encoding="utf-8")
         (target / "booklet.html").write_text(render_booklet(feast, recipe_map), encoding="utf-8")
     return feasts
