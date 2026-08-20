@@ -56,6 +56,7 @@
   };
   const decimal = (value, places = 2) => Number(value.toFixed(places)).toString();
   const normalizedUnit = unit => String(unit || "").trim().toLowerCase().replace(/\.$/, "");
+  const familiarVolumeUnits = new Set(["tsp", "teaspoon", "teaspoons", "tbsp", "tablespoon", "tablespoons", "cup", "cups"]);
   const convertedMeasure = (value, unit, system) => {
     const normalized = normalizedUnit(unit);
     if (!Number.isFinite(value)) return null;
@@ -159,7 +160,9 @@
     const displayMeasure = (quantity, unit, itemScale = 1) => {
       const numeric = fraction(quantity);
       const converted = numeric === null ? null : convertedMeasure(numeric * itemScale, unit, unitSystem);
-      return converted || `${scaleQuantity(quantity, itemScale)}${unit ? " " + unit : ""}`;
+      const original = `${scaleQuantity(quantity, itemScale)}${unit ? " " + unit : ""}`;
+      if (converted && unitSystem === "international" && familiarVolumeUnits.has(normalizedUnit(unit))) return `${original} (${converted})`;
+      return converted || original;
     };
     const applyUnits = () => {
       document.querySelectorAll('.annotation.parameter[data-name="temp"]').forEach(element => element.textContent = displayTemperature(element.dataset.quantity, element.dataset.unit));

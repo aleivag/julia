@@ -181,7 +181,10 @@ must currently open and close on the same physical line.
 The International/Imperial control converts temperatures and structured
 culinary quantities. Supported ingredient conversions include `oz`/`lb` ↔
 `g`/`kg` and `tsp`/`tbsp`/`cups`/`fl oz`/`qt` ↔ `ml`/`L`. Unknown units and
-free-form compound quantities remain as authored.
+free-form compound quantities remain as authored. Teaspoons, tablespoons, and
+cups remain the primary display when using International units, with the metric
+volume shown as a convenience: `2 tbsp (30 ml)`, `1 tsp (5 ml)`, or
+`1 cup (240 ml)`.
 
 ## Guides
 
