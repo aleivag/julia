@@ -499,6 +499,13 @@ The generated site provides selectable `auto`, `nordic`, `night`, and
 `editorial` presentation themes. Auto follows the device color scheme, the
 choice persists in local cookbook data, and print output always uses Editorial.
 
+Recipe pages derive a top-level preparation checklist from external ingredients.
+Generated step products are excluded, dependency ingredients are grouped by
+their source recipes, and its gathering state is independent from step-level
+usage checks. Scaling, units, and ingredient gathering share one setup panel.
+Step names share the instruction heading with a compact circled number, leaving
+the left column for ingredients, inputs, outputs, and equipment.
+
 ### Guides
 
 Guides are implemented as Markdown files in `guides/`. They provide searchable

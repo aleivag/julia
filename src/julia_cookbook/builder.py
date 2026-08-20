@@ -216,7 +216,7 @@ def _embedded_recipe_steps(
                 note = f'<small>{escape(ingredient.note)}</small>' if ingredient.note else ""
                 check_key = f"{step_key}:ingredient:{ingredient_index}"
                 ingredient_rows.append(
-                    f'<li><label><input type="checkbox" data-check="dependency-ingredient" data-key="{escape(check_key)}" data-embedded-check="{escape(check_key)}"><span class="measure" data-quantity="{escape(quantity)}" data-unit="{escape(ingredient.unit)}"{fixed}>{escape(display)}</span><span>{escape(ingredient.name)}</span>{note}</label></li>'
+                    f'<li><label><input type="checkbox" data-check="dependency-ingredient" data-key="{escape(check_key)}" data-embedded-check="{escape(check_key)}" data-ingredient-source="{escape(dependency.id)}" data-ingredient-name="{escape(ingredient.name)}" data-ingredient-unit="{escape(ingredient.unit)}"><span class="measure" data-quantity="{escape(quantity)}" data-unit="{escape(ingredient.unit)}"{fixed}>{escape(display)}</span><span>{escape(ingredient.name)}</span>{note}</label></li>'
                 )
             input_rows = []
             for input_index, item in enumerate(step.inputs):
@@ -234,7 +234,6 @@ def _embedded_recipe_steps(
             instructions = _render_input_origins(
                 _scaled_embedded_html(step.html, scale, step_key), step.inputs, product_sources
             )
-            heading = f'<p class="component">{escape(step.title)}</p>' if step.title else ""
             inputs = f'<div class="step-products"><p>From earlier steps</p><ul>{"".join(input_rows)}</ul></div>' if input_rows else ""
             outputs = f'<div class="step-products outputs"><p>Produces</p><ul>{"".join(output_rows)}</ul></div>' if output_rows else ""
             nested = "".join(
@@ -242,8 +241,8 @@ def _embedded_recipe_steps(
                 for child_index, item in enumerate(step.subrecipes, start=1)
             )
             rendered_steps.append(f'''<article class="recipe-step embedded-tree-step" id="{escape(anchor_prefix)}{_embedded_anchor(number_parts)}" data-embedded-step>
-              <aside>{heading}<ul class="ingredient-list">{"".join(ingredient_rows)}</ul>{inputs}{outputs}</aside>
-              <section class="instructions"><div class="step-heading"><span class="step-number">{number}</span><label><input type="checkbox" data-check="dependency-step" data-key="{escape(step_key)}" data-step-completion><span>Step complete</span></label></div>{instructions}</section>
+              <aside><ul class="ingredient-list">{"".join(ingredient_rows)}</ul>{inputs}{outputs}</aside>
+              <section class="instructions"><div class="step-heading"><span class="step-identity"><span class="step-number">{number}</span>{f'<span class="step-title">{escape(step.title)}</span>' if step.title else ''}</span><label><input type="checkbox" data-check="dependency-step" data-key="{escape(step_key)}" data-step-completion><span>Step complete</span></label></div>{instructions}</section>
             </article>{nested}''')
         for item in step.outputs:
             product_sources[item.name.casefold()] = (number, step.title)
@@ -275,8 +274,9 @@ def _dependency_step(
     children = _embedded_recipe_steps(
         dependency, recipes, scale, number_parts, (*step_path, dependency.id), anchor_prefix
     )
+    dependency_title = f'Prepare <span class="inline-measure" data-quantity="{escape(requested)}" data-unit="{escape(reference.unit)}">{escape(requested_display)}</span> {escape(dependency.title)}'
     return f'''<details class="recipe-step dependency-step" id="{escape(anchor)}"{data_step} data-dependency-node>
-      <summary class="dependency-step-summary"><aside><p class="component">Included recipe</p><span class="measure" data-quantity="{escape(requested)}" data-unit="{escape(reference.unit)}">{escape(requested_display)}</span></aside><section class="instructions"><div class="step-heading"><span class="step-number">{number}</span><label><input type="checkbox" data-check="{check_kind}" data-key="{escape(root_step_id or step_key)}" data-step-completion><span>Step complete</span></label></div><p>Prepare <span class="inline-measure" data-quantity="{escape(requested)}" data-unit="{escape(reference.unit)}">{escape(requested_display)}</span> <strong>{escape(dependency.title)}</strong>.</p></section></summary>
+      <summary class="dependency-step-summary"><aside><p class="component">Included recipe</p><span class="measure" data-quantity="{escape(requested)}" data-unit="{escape(reference.unit)}">{escape(requested_display)}</span></aside><section class="instructions"><div class="step-heading"><span class="step-identity"><span class="step-number">{number}</span><span class="step-title">{dependency_title}</span></span><label><input type="checkbox" data-check="{check_kind}" data-key="{escape(root_step_id or step_key)}" data-step-completion><span>Step complete</span></label></div></section></summary>
       <div class="dependency-children"><div class="embedded-recipe-head"><span>Included preparation</span><a href="{escape(dependency.id)}.html">Open full recipe</a></div>{children}</div>
     </details>'''
 
@@ -307,6 +307,64 @@ def _variant_href(recipe: Recipe, variant: RecipeVariant) -> str:
     return f"{recipe.id}.html" if variant.default else f"{recipe.id}--{variant.id}.html"
 
 
+def _ingredient_overview(recipe: Recipe, recipes: dict[str, Recipe]) -> str:
+    groups: list[str] = []
+    item_count = 0
+
+    def collect(current: Recipe, scale: float, trail: tuple[str, ...], main: bool = False) -> None:
+        nonlocal item_count
+        if current.id in trail:
+            chain = " -> ".join((*trail, current.id))
+            raise ValueError(f"circular recipe dependency: {chain}")
+        rows = []
+        selected_steps = default_steps(current)
+        current_ingredients = [item for step in selected_steps for item in step.ingredients]
+        ratio_base = next((item for item in current_ingredients if item.attributes.get("base") == "true"), None)
+        if ratio_base is None:
+            ratio_base = next((item for item in current_ingredients if item.unit.lower() in {"g", "kg", "oz", "lb"}), None)
+        for step in selected_steps:
+            for item in step.ingredients:
+                quantity = item.quantity if item.attributes.get("scale") == "false" else scaled_quantity(item.quantity, scale)
+                is_ratio = item.unit.lower() == "bakers"
+                display = f"{quantity}%" if is_ratio else " ".join(part for part in (quantity, item.unit) if part) or "as needed"
+                fixed = ' data-scale-item="false"' if item.attributes.get("scale") == "false" else ""
+                ratio_attrs = ""
+                item_ratio_base = next((candidate for candidate in current_ingredients if candidate.name.lower() == item.attributes.get("ratio_of", "").lower()), None) or ratio_base
+                if is_ratio and item_ratio_base:
+                    base_quantity = item_ratio_base.quantity if item_ratio_base.attributes.get("scale") == "false" else scaled_quantity(item_ratio_base.quantity, scale)
+                    ratio_attrs = f' data-ratio="{escape(quantity)}" data-base-quantity="{escape(base_quantity)}" data-base-unit="{escape(item_ratio_base.unit)}"'
+                    if item.attributes.get("options"):
+                        ratio_attrs += f' data-ratio-options="{escape(item.attributes["options"])}"'
+                prep_key = f"{current.id}|{item.name.casefold()}|{item.unit.casefold()}"
+                rows.append(
+                    f'<li><label><input type="checkbox" data-prep-ingredient="{escape(prep_key)}" '
+                    f'data-ingredient-source="{escape(current.id)}" data-ingredient-name="{escape(item.name)}" '
+                    f'data-ingredient-unit="{escape(item.unit)}"><span class="measure" data-quantity="{escape(quantity)}" '
+                    f'data-unit="{escape(item.unit)}"{fixed}{ratio_attrs}>{escape(display)}</span><span>{escape(item.name)}</span>'
+                    f'{f"<small>{escape(item.note)}</small>" if item.note else ""}</label></li>'
+                )
+                item_count += 1
+        if rows:
+            heading = escape(current.title) if main else f'<a href="{escape(current.id)}.html">{escape(current.title)}</a>'
+            groups.append(
+                f'<section class="ingredient-overview-group" data-ingredient-recipe="{escape(current.id)}">'
+                f'<h3>{heading}</h3><ul class="ingredient-overview-list">{"".join(rows)}</ul></section>'
+            )
+        for step in default_steps(current):
+            for reference in step.subrecipes:
+                dependency = recipes.get(reference.name)
+                if not dependency:
+                    raise ValueError(f"{current.path}: unknown subrecipe '{reference.name}'")
+                collect(dependency, dependency_scale(reference, scale, dependency), (*trail, current.id))
+
+    collect(recipe, 1.0, (), main=True)
+    if not groups:
+        return ""
+    recipe_count = len(groups)
+    summary = f"{item_count} item{'s' if item_count != 1 else ''} · {recipe_count} recipe{'s' if recipe_count != 1 else ''}"
+    return f'''<section class="ingredients-panel" data-ingredient-summary="{escape(summary)}"><div class="ingredients-panel-heading"><h2>Ingredients</h2><span>{escape(summary)}</span></div><div class="ingredients-panel-body">{"".join(groups)}</div></section>'''
+
+
 def _choice_step(group: list[Any], display_number: int, recipes: dict[str, Recipe], recipe_id: str, ratio_base: Annotation | None = None) -> str:
     choice = group[0].attributes["choice"]
     default = next((step for step in group if step.attributes.get("default") == "true"), group[0])
@@ -331,7 +389,7 @@ def _choice_step(group: list[Any], display_number: int, recipes: dict[str, Recip
                 if item.attributes.get("options"):
                     measure_attrs += f' data-ratio-options="{escape(item.attributes["options"])}"'
             ingredients.append(
-                f'<li><label><input type="checkbox" data-check="choice-ingredient" data-key="{escape(check_key)}" data-ingredient-index="{index}" data-embedded-check="{escape(check_key)}"><span class="measure" {measure_attrs}>{escape(display)}</span><span>{escape(item.name)}</span>{f"<small>{escape(item.note)}</small>" if item.note else ""}</label></li>'
+                f'<li><label><input type="checkbox" data-check="choice-ingredient" data-key="{escape(check_key)}" data-ingredient-index="{index}" data-embedded-check="{escape(check_key)}" data-ingredient-source="{escape(recipe_id)}" data-ingredient-name="{escape(item.name)}" data-ingredient-unit="{escape(item.unit)}"><span class="measure" {measure_attrs}>{escape(display)}</span><span>{escape(item.name)}</span>{f"<small>{escape(item.note)}</small>" if item.note else ""}</label></li>'
             )
         outputs = "".join(
             f'<li>{_product_measure(item)}<span>{escape(item.name)}</span></li>'
@@ -355,7 +413,7 @@ def _choice_step(group: list[Any], display_number: int, recipes: dict[str, Recip
     title = group[0].title or choice.replace("-", " ")
     return f'''<article class="recipe-step choice-step" id="step-{display_number}" data-step="choice-{escape(choice)}" data-choice-step="{escape(choice)}" data-choice-default="{escape(default.attributes['option'])}">
       <aside><p class="component">Choose one</p><div class="choice-controls">{"".join(controls)}</div></aside>
-      <section class="instructions"><div class="step-heading"><span class="step-number">{display_number}</span><label><input type="checkbox" data-check="step" data-key="choice-{escape(choice)}"><span>Step complete</span></label></div><h3>{escape(title)}</h3><div class="choice-panels">{"".join(panels)}</div></section>
+      <section class="instructions"><div class="step-heading"><span class="step-identity"><span class="step-number">{display_number}</span><span class="step-title">{escape(title)}</span></span><label><input type="checkbox" data-check="step" data-key="choice-{escape(choice)}"><span>Step complete</span></label></div><div class="choice-panels">{"".join(panels)}</div></section>
     </article>'''
 
 
@@ -479,7 +537,7 @@ def _recipe_page(
                 measure_attrs += f' data-ratio="{escape(item.quantity)}" data-base-quantity="{escape(item_ratio_base.quantity)}" data-base-unit="{escape(item_ratio_base.unit)}"'
                 if item.attributes.get("options"):
                     measure_attrs += f' data-ratio-options="{escape(item.attributes["options"])}"'
-            ingredient_rows.append(f'''<li><label><input type="checkbox" data-check="ingredient" data-key="{step.id}:{i}" data-ingredient-index="{i}"><span class="measure" {measure_attrs}>{escape(display)}</span> <span>{escape(item.name)}</span>{f'<small>{escape(item.note)}</small>' if item.note else ''}</label><label class="actual-used">Used <input type="number" min="0" step="any" inputmode="decimal" data-actual="{step.id}:{i}" data-ingredient-name="{escape(item.name)}"{ratio_attrs}> <span>{escape(actual_unit)}</span></label><p class="ratio-warning" data-ratio-warning="{step.id}:{i}"></p></li>''')
+            ingredient_rows.append(f'''<li><label><input type="checkbox" data-check="ingredient" data-key="{step.id}:{i}" data-ingredient-index="{i}" data-ingredient-source="{escape(recipe.id)}" data-ingredient-name="{escape(item.name)}" data-ingredient-unit="{escape(item.unit)}"><span class="measure" {measure_attrs}>{escape(display)}</span> <span>{escape(item.name)}</span>{f'<small>{escape(item.note)}</small>' if item.note else ''}</label><label class="actual-used">Used <input type="number" min="0" step="any" inputmode="decimal" data-actual="{step.id}:{i}" data-ingredient-name="{escape(item.name)}"{ratio_attrs}> <span>{escape(actual_unit)}</span></label><p class="ratio-warning" data-ratio-warning="{step.id}:{i}"></p></li>''')
         ingredients = "".join(ingredient_rows)
         input_rows = []
         for input_index, item in enumerate(step.inputs):
@@ -514,11 +572,10 @@ def _recipe_page(
             for child_index, item in enumerate(step.subrecipes, start=1)
         )
         equipment = "".join(f'<span class="equipment-chip">{escape(item.name)}</span>' for item in step.equipment)
-        heading = f'<p class="component">{escape(step.title)}</p>' if step.title else ""
         step_html = _render_input_origins(step.html, step.inputs, product_sources)
         steps.append(f'''<article class="recipe-step" id="step-{index + 1}" data-step="{step.id}">
-          <aside>{heading}<ul class="ingredient-list">{ingredients}{'<li class="muted">No external ingredients</li>' if not ingredients and not input_rows else ''}</ul>{inputs}{outputs}{equipment}</aside>
-          <section class="instructions"><div class="step-heading"><span class="step-number">{index + 1}</span><label><input type="checkbox" data-check="step" data-key="{step.id}"><span>Step complete</span></label></div>{step_html}<textarea data-step-note="{step.id}" placeholder="Note from this cook" aria-label="Notes for step {index + 1}"></textarea></section>
+          <aside><ul class="ingredient-list">{ingredients}</ul>{inputs}{outputs}{equipment}</aside>
+          <section class="instructions"><div class="step-heading"><span class="step-identity"><span class="step-number">{index + 1}</span>{f'<span class="step-title">{escape(step.title)}</span>' if step.title else ''}</span><label><input type="checkbox" data-check="step" data-key="{step.id}"><span>Step complete</span></label></div>{step_html}<textarea data-step-note="{step.id}" placeholder="Note from this cook" aria-label="Notes for step {index + 1}"></textarea></section>
         </article>{nested_dependencies}''')
         for item in step.outputs:
             product_sources[item.name.casefold()] = (index + 1, step.title)
@@ -544,11 +601,12 @@ def _recipe_page(
         difference = bakers_formula["total"] - yield_spec.total
         initial_result = "No extra dough" if abs(difference) < 0.05 else f'{difference:g} {yield_spec.unit} extra' if difference > 0 else f'{abs(difference):g} {yield_spec.unit} short'
         formula_control = f'''<div class="bakers-formula" data-bakers-formula data-original-flour="{bakers_formula["base_amount"]:g}" data-flour-unit="{escape(bakers_formula["base"].unit)}" data-original-hydration="{bakers_formula["hydration_value"]:g}" data-other-ratio="{bakers_formula["other_ratio"]:g}"><label><span>Total flour</span><span class="compound-field"><input type="number" min="0.01" step="any" value="{bakers_formula["base_amount"]:g}" data-formula-flour><span>{escape(bakers_formula["base"].unit)}</span></span></label><label><span>Hydration</span><select data-formula-hydration>{option_html}</select></label><div class="formula-yield"><span>Available dough</span><strong><output data-formula-total>{bakers_formula["total"]:g}</output> {escape(yield_spec.unit)}</strong><small data-formula-result>{escape(initial_result)}</small></div></div>'''
-    scale_panel = f'''<details class="scale-panel"><summary><span>Scale &amp; units</span><strong data-scale-summary>Original</strong></summary><div class="scale-panel-body">{formula_control}{compound_control}{anchor_control}<label class="quick-scale"><span>Quick scale</span><select data-scale><option value="0.5">Half</option><option value="1" selected>Original</option><option value="1.5">1.5x</option><option value="2">Double</option><option value="3">Triple</option><option value="custom" hidden>Custom</option></select></label><fieldset class="unit-system"><legend>Units</legend><div role="group" aria-label="Measurement units"><button type="button" data-unit-system="international">International</button><button type="button" data-unit-system="imperial">Imperial</button></div></fieldset></div></details>'''
+    ingredient_overview = _ingredient_overview(recipe, recipes)
+    scale_panel = f'''<details class="scale-panel recipe-setup-panel"><summary><span>Recipe setup</span><strong data-scale-summary>Original</strong></summary><div class="scale-panel-body">{formula_control}{compound_control}{anchor_control}<label class="quick-scale"><span>Quick scale</span><select data-scale><option value="0.5">Half</option><option value="1" selected>Original</option><option value="1.5">1.5x</option><option value="2">Double</option><option value="3">Triple</option><option value="custom" hidden>Custom</option></select></label><fieldset class="unit-system"><legend>Units</legend><div role="group" aria-label="Measurement units"><button type="button" data-unit-system="international">International</button><button type="button" data-unit-system="imperial">Imperial</button></div></fieldset>{ingredient_overview}</div></details>'''
     content = f'''<header class="recipe-hero"><div><p class="eyebrow">Recipe</p><h1>{escape(recipe.title)}</h1><p class="recipe-yield">Makes <strong>{yield_text}</strong></p>{source}<div class="tag-list">{tags}</div></div>
       {relationship_html}<div class="recipe-actions"><button class="primary" data-action="start-cook">Make this recipe</button><a class="source-button" href="../sources/{recipe.id}.html">Show source</a></div></header>
       {variant_nav}<div class="progress-wrap" hidden data-progress-wrap><div><span data-progress-text>0 of {len(step_groups)} steps</span><button class="text-button" data-action="finish-cook">Finish cook</button></div><progress max="{len(step_groups)}" value="0" data-progress></progress></div>
-      <section class="recipe-body">{blurb_html}{scale_panel}{''.join(steps)}{variation_html}<section class="cook-history"><p class="eyebrow">Cook log</p><h2>Past experiments</h2><div data-cook-history><p class="muted">No completed cooks on this device yet.</p></div></section></section>
+      <section class="recipe-body">{blurb_html}<div class="recipe-tools">{scale_panel}</div>{''.join(steps)}{variation_html}<section class="cook-history"><p class="eyebrow">Cook log</p><h2>Past experiments</h2><div data-cook-history><p class="muted">No completed cooks on this device yet.</p></div></section></section>
       <dialog id="finish-dialog" class="finish-dialog"><form method="dialog" data-finish-form><div class="dialog-head"><h2>Finish this cook</h2><button class="icon-button" value="cancel" aria-label="Close">&times;</button></div><label>Outcome<select name="outcome"><option value="worked">Worked well</option><option value="change">Would change</option><option value="failed">Did not work</option></select></label><label>Summary<textarea name="summary" placeholder="What will you remember next time?"></textarea></label><div class="button-row"><button class="primary" value="default">Save cooking event</button><button type="button" class="secondary danger" data-action="discard-cook">Discard cook</button></div></form></dialog>'''
     recipe_data = recipe.to_dict()
     if parent and selected_variant:

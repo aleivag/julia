@@ -277,6 +277,20 @@
       progress();
     };
     if (active) enterCook(active);
+    const prepInputs = [...document.querySelectorAll("[data-prep-ingredient]")];
+    const prepState = store.preferences?.[recipeKey]?.ingredientPrep || {};
+    const savePrep = prep => {
+      store.preferences ||= {}; store.preferences[recipeKey] ||= {}; store.preferences[recipeKey].ingredientPrep ||= {};
+      store.preferences[recipeKey].ingredientPrep[prep.dataset.prepIngredient] = prep.checked;
+    };
+    prepInputs.forEach(prep => {
+      prep.checked = !!prepState[prep.dataset.prepIngredient];
+      prep.addEventListener("change", () => {
+        prepInputs.filter(other => other.dataset.prepIngredient === prep.dataset.prepIngredient).forEach(other => { other.checked = prep.checked; });
+        savePrep(prep); saveStore();
+      });
+    });
+    progress();
     document.querySelector('[data-action="start-cook"]').addEventListener("click", () => {
       const session = store.active[recipeKey] || { id: uuid(), recipeId: recipeKey, recipeTitle: recipe.variantTitle ? `${recipe.metadata.title} — ${recipe.variantTitle}` : recipe.metadata.title, startedAt: new Date().toISOString(), scale, checks: {}, notes: {} };
       store.active[recipeKey] = session; saveStore(); enterCook(session); toast("Cook started"); document.querySelector("#step-1")?.scrollIntoView();

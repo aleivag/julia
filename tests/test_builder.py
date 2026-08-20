@@ -2,6 +2,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
 import json
+import re
 
 from julia_cookbook.builder import _search_key, build
 
@@ -108,8 +109,8 @@ Whip @egg whites{2}.
             scaling = (output / "recipes" / "scaling.html").read_text(encoding="utf-8")
             self.assertIn('data-anchor-original="5"', scaling)
             self.assertIn('data-anchor-original="6"', scaling)
-            self.assertIn('<details class="scale-panel">', scaling)
-            self.assertIn("Scale &amp; units", scaling)
+            self.assertIn('<details class="scale-panel recipe-setup-panel">', scaling)
+            self.assertIn("Recipe setup", scaling)
             self.assertIn('"units":"international"', scaling)
             self.assertIn("A short note introducing the recipe", scaling)
             self.assertIn('../recipes/meringue.html', scaling)
@@ -127,6 +128,17 @@ Whip @egg whites{2}.
             self.assertEqual(ingredients[0]["quantity"], "1")
             self.assertEqual(ingredients[3]["quantity"], "2")
             croque_html = (output / "recipes" / "croque.html").read_text(encoding="utf-8")
+            ingredient_overview = re.search(r'<section class="ingredients-panel".*?</section></div></details>', croque_html, re.DOTALL)
+            self.assertIsNotNone(ingredient_overview)
+            overview_html = ingredient_overview.group(0)
+            self.assertIn('data-ingredient-recipe="croque"', overview_html)
+            self.assertIn('data-ingredient-recipe="mornay"', overview_html)
+            self.assertIn('data-ingredient-recipe="bechamel"', overview_html)
+            self.assertIn('data-prep-ingredient=', overview_html)
+            self.assertNotIn('data-ingredient-name="Mornay sauce"', overview_html)
+            self.assertNotIn('data-ingredient-name="Béchamel sauce"', overview_html)
+            self.assertIn('<span class="step-number">1</span><span class="step-title">Prepare ', croque_html)
+            self.assertIn('<span class="step-number">2</span><span class="step-title">use sauce</span>', croque_html)
             self.assertEqual(croque_html.count('class="recipe-step dependency-step"'), 2)
             self.assertIn("Included preparation", croque_html)
             self.assertIn("Bechamel", croque_html)
@@ -145,6 +157,9 @@ Whip @egg whites{2}.
                 ["eggs", "sugar"],
             )
             product_html = (output / "recipes" / "step-products.html").read_text(encoding="utf-8")
+            product_overview = re.search(r'<section class="ingredients-panel".*?</section></div></details>', product_html, re.DOTALL).group(0)
+            self.assertNotIn('data-ingredient-name="egg yolks"', product_overview)
+            self.assertNotIn('data-ingredient-name="custard"', product_overview)
             self.assertIn("From step 1, separate", product_html)
             self.assertIn("From step 2, mix", product_html)
             self.assertEqual(product_html.count("From earlier steps"), 2)
@@ -164,7 +179,7 @@ Whip @egg whites{2}.
             self.assertEqual(choice_html.count('class="choice-dependencies"'), 2)
             self.assertIn('id="choice-instant-embedded-step-1-1"', choice_html)
             self.assertIn('id="choice-fresh-embedded-step-1-1"', choice_html)
-            self.assertEqual(choice_html.count('data-ratio-options="65|70|75"'), 2)
+            self.assertEqual(choice_html.count('data-ratio-options="65|70|75"'), 3)
             choice_payload = next(recipe for recipe in payloads if recipe["id"] == "choice")
             choice_items = [item for item in choice_payload["shoppingIngredients"] if item.get("choice")]
             self.assertEqual(

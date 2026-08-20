@@ -26,6 +26,12 @@ top-level `== variant name ==` sections. Generic `@include{relative/path.md}`
 directives let those variants—or any recipe source—live in smaller files without
 turning the included fragments into recipe dependencies.
 
+Recipe pages include a preparation checklist above the steps. It contains only
+external ingredients, never intermediate step products, and groups recursively
+included recipe ingredients beneath their own recipe names. The gathering list
+shares one setup panel with scaling and units. Its state is stored locally but is
+deliberately independent from the ingredient checkboxes used while cooking.
+
 The generated collection is divided by content type:
 
 ```text
