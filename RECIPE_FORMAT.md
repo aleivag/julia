@@ -337,6 +337,14 @@ Dependencies scale recursively. Their external ingredients enter shopping
 lists, while their instructions can be expanded in the parent recipe. Missing
 dependencies and circular dependency chains are build errors.
 
+Use `[scale=false]` when a dependency should remain one fixed preparation even
+as the parent recipe scales. This is useful for a house sauce, syrup, or cordial
+made as a practical full batch:
+
+```markdown
+Prepare @recipe{pineapple-cordial}{1%batch}[scale=false].
+```
+
 A step containing one recipe dependency and no external ingredients or inputs
 becomes a collapsible dependency step. Its recipe steps inherit hierarchical
 numbers from the parent:

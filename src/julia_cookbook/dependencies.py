@@ -59,11 +59,12 @@ def yield_amount(recipe: Recipe) -> float | None:
 
 
 def dependency_scale(reference: Any, parent_scale: float, dependency: Recipe) -> float:
+    reference_scale = 1.0 if reference.attributes.get("scale") == "false" else parent_scale
     requested = amount(reference.quantity)
     produced = yield_amount(dependency)
     if requested is not None and produced:
-        return requested * parent_scale / produced
-    return parent_scale
+        return requested * reference_scale / produced
+    return reference_scale
 
 
 def walk_recipe(

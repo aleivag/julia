@@ -19,6 +19,32 @@ class DependencyTests(TestCase):
         self.assertEqual([recipe.id for recipe, _ in expanded], ["bechamel", "mornay", "croque"])
         self.assertEqual([scale for _, scale in expanded], [0.5, 0.5, 1.0])
 
+    def test_fixed_dependency_does_not_follow_parent_scale(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "cordial.md").write_text("""---
+title: Cordial
+yield: 1 batch
+---
+== step mix ==
+Mix @juice{830%g}.
+""")
+            (root / "cocktail.md").write_text("""---
+title: Cocktail
+yield: 1 cocktail
+---
+== step cordial ==
+Prepare @recipe{cordial}{1%batch}[scale=false].
+== step mix ==
+Add @spirit{25%ml}.
+""")
+            recipes = {name: parse_recipe(root / f"{name}.md") for name in ("cordial", "cocktail")}
+
+            expanded = walk_recipe(recipes["cocktail"], 6.0, recipes)
+
+            self.assertEqual([recipe.id for recipe, _ in expanded], ["cordial", "cocktail"])
+            self.assertEqual([scale for _, scale in expanded], [1.0, 6.0])
+
     def test_reports_circular_dependency_chain(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)

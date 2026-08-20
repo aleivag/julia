@@ -264,7 +264,7 @@ def _dependency_step(
         chain = " -> ".join((*trail, dependency.id))
         raise ValueError(f"circular recipe dependency: {chain}")
     scale = dependency_scale(reference, parent_scale, dependency)
-    requested = scaled_quantity(reference.quantity, parent_scale)
+    requested = reference.quantity if reference.attributes.get("scale") == "false" else scaled_quantity(reference.quantity, parent_scale)
     requested_display = " ".join(part for part in (requested, reference.unit) if part) or "as needed"
     number = _step_number(number_parts)
     step_key = "/".join((*step_path, dependency.id))
@@ -274,9 +274,10 @@ def _dependency_step(
     children = _embedded_recipe_steps(
         dependency, recipes, scale, number_parts, (*step_path, dependency.id), anchor_prefix
     )
-    dependency_title = f'Prepare <span class="inline-measure" data-quantity="{escape(requested)}" data-unit="{escape(reference.unit)}">{escape(requested_display)}</span> {escape(dependency.title)}'
+    fixed = ' data-scale-item="false"' if reference.attributes.get("scale") == "false" else ""
+    dependency_title = f'Prepare <span class="inline-measure" data-quantity="{escape(requested)}" data-unit="{escape(reference.unit)}"{fixed}>{escape(requested_display)}</span> {escape(dependency.title)}'
     return f'''<details class="recipe-step dependency-step" id="{escape(anchor)}"{data_step} data-dependency-node>
-      <summary class="dependency-step-summary"><aside><p class="component">Included recipe</p><span class="measure" data-quantity="{escape(requested)}" data-unit="{escape(reference.unit)}">{escape(requested_display)}</span></aside><section class="instructions"><div class="step-heading"><span class="step-identity"><span class="step-number">{number}</span><span class="step-title">{dependency_title}</span></span><label><input type="checkbox" data-check="{check_kind}" data-key="{escape(root_step_id or step_key)}" data-step-completion><span>Step complete</span></label></div></section></summary>
+      <summary class="dependency-step-summary"><aside><p class="component">Included recipe</p><span class="measure" data-quantity="{escape(requested)}" data-unit="{escape(reference.unit)}"{fixed}>{escape(requested_display)}</span></aside><section class="instructions"><div class="step-heading"><span class="step-identity"><span class="step-number">{number}</span><span class="step-title">{dependency_title}</span></span><label><input type="checkbox" data-check="{check_kind}" data-key="{escape(root_step_id or step_key)}" data-step-completion><span>Step complete</span></label></div></section></summary>
       <div class="dependency-children"><div class="embedded-recipe-head"><span>Included preparation</span><a href="{escape(dependency.id)}.html">Open full recipe</a></div>{children}</div>
     </details>'''
 
