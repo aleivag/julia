@@ -112,7 +112,9 @@ html[data-page="index"] main{flex:1}
 .search-suggestion-list strong{font:650 15px var(--sans)}
 .search-suggestion-list span{color:var(--muted);font:11px var(--sans);white-space:nowrap}
 .search-suggestions>p{margin:0;padding:10px 18px;border-top:1px solid var(--line);color:var(--muted);font:11px var(--sans)}
-.home-search-actions{margin-top:18px}
+.home-search-actions{display:flex;align-items:center;justify-content:center;gap:10px;margin-top:18px;font-family:var(--sans)}
+.home-search-actions>a{padding:6px 10px;color:var(--muted);font-size:12px;font-weight:650;text-decoration:none}
+.home-search-actions>a:hover{color:var(--ink);text-decoration:underline;text-underline-offset:4px}
 .home-search-actions button{min-height:36px;padding:5px 12px;border-color:transparent;color:var(--muted);font-size:12px}
 .home-search-actions button:hover{border-color:var(--line);background:var(--surface);color:var(--ink)}
 .home-search-actions button span{display:inline-grid;place-items:center;min-width:20px;height:20px;margin-left:4px;border-radius:50%;background:var(--surface);color:var(--ink)}
@@ -134,3 +136,40 @@ html[data-theme-effective="editorial"] .search-suggestions{border-radius:0;box-s
 @media(max-width:1168px){.search-results-head{margin-left:24px;margin-right:24px}}
 @media(max-width:780px){.recipe-search-home{min-height:calc(100svh - 122px);width:min(100% - 28px,760px);padding:42px 0}.recipe-search-intro h1{font-size:44px}.recipe-search-intro>p:last-child{font-size:16px}.home-search-form{margin-top:28px}.home-search-field{grid-template-columns:22px minmax(0,1fr);gap:9px;min-height:60px;padding:6px 16px;border-radius:14px}.home-search-field svg{width:20px;height:20px}.home-search-field input{height:48px;font-size:16px}.home-search-field button{grid-column:1/-1;width:100%;margin:2px 0 4px}.search-suggestion-list a{display:grid;gap:2px}.search-suggestion-list span{white-space:normal}.search-results-head{margin:0 14px;padding-top:18px}.has-search-results .recipe-search-home{padding:32px 0 18px}.has-search-results .recipe-search-intro>p:last-child{display:none}}
 @media(prefers-reduced-motion:reduce){.recipe-search-results:not([hidden]){animation:none}}
+
+/* A book-like, static index for browsing the full recipe collection. */
+.recipe-index-hero{max-width:1120px;margin:0 auto;padding:58px 20px 34px;border-bottom:1px solid var(--ink)}
+.recipe-index-hero h1{margin:0;font-size:clamp(42px,7vw,68px);font-weight:500;line-height:1.02;letter-spacing:-.035em}
+.recipe-index-hero>p:not(.eyebrow){max-width:650px;margin:16px 0 0;color:var(--muted);font-size:18px}
+.recipe-index-nav{display:flex;flex-wrap:wrap;gap:8px;margin-top:28px;font-family:var(--sans)}
+.recipe-index-nav a{padding:8px 12px;border:1px solid var(--line);border-radius:999px;color:var(--ink);font-size:12px;font-weight:650;text-decoration:none}
+.recipe-index-nav a:hover{border-color:var(--green);color:var(--green)}
+.recipe-index-filter{max-width:720px;margin-top:24px;font-family:var(--sans);text-align:left}
+.recipe-index-filter>label{display:block;margin-bottom:7px;color:var(--muted);font-size:11px;font-weight:650;text-transform:uppercase;letter-spacing:.06em}
+.recipe-index-filter>div{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}
+.recipe-index-filter input{width:100%;height:48px;padding:0 15px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);font-size:15px}
+.recipe-index-filter button{min-height:48px}
+.recipe-index-filter>p{margin:7px 0 0;color:var(--muted);font-size:11px}
+.recipe-index-alphabet{position:sticky;top:62px;z-index:3;display:flex;flex-wrap:wrap;gap:5px;max-width:1120px;margin:0 auto;padding:14px 20px;border-bottom:1px solid var(--line);background:color-mix(in srgb,var(--paper) 94%,transparent);backdrop-filter:blur(10px);font:650 12px var(--sans)}
+.recipe-index-alphabet a{display:grid;width:29px;height:29px;place-items:center;border-radius:50%;color:var(--ink);text-decoration:none}
+.recipe-index-alphabet a:hover{background:var(--ink);color:var(--paper)}
+.recipe-index-section{max-width:1120px;margin:0 auto;padding:54px 20px;scroll-margin-top:64px}
+.recipe-index-section+.recipe-index-section{border-top:1px solid var(--line)}
+.recipe-index-section>header{display:grid;grid-template-columns:minmax(180px,1fr) 2fr;gap:36px;margin-bottom:30px}
+.recipe-index-section>header h2{margin:0;font-size:32px;font-weight:550;line-height:1.1}
+.recipe-index-section>header p{max-width:600px;margin:0;color:var(--muted)}
+.recipe-index-groups{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:34px 46px}
+.recipe-index-group{break-inside:avoid;scroll-margin-top:64px}
+.recipe-index-group h3{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:0 0 9px;padding-bottom:7px;border-bottom:1px solid var(--ink);font:650 14px var(--sans);text-transform:capitalize}
+.recipe-index-group h3 span{color:var(--muted);font-size:10px;font-weight:500}
+.recipe-index-group ul{margin:0;padding:0;list-style:none}
+.recipe-index-group li{padding:4px 0;border-bottom:1px dotted var(--line)}
+.recipe-index-group a{color:var(--ink);text-decoration:none}
+.recipe-index-group a:hover{color:var(--red);text-decoration:underline;text-underline-offset:3px}
+html[data-theme-effective="night"] .recipe-index-alphabet{background:rgba(16,18,16,.94)}
+html[data-theme-effective="editorial"] .recipe-index-hero h1{font-style:italic;font-weight:400}
+html[data-theme-effective="editorial"] .recipe-index-nav a{border-radius:0}
+html[data-theme-effective="editorial"] .recipe-index-filter input{border-radius:0}
+html[data-theme-effective="editorial"] .recipe-index-alphabet{top:0}
+@media(max-width:780px){.recipe-index-hero{padding:38px 16px 26px}.recipe-index-hero h1{font-size:42px}.recipe-index-filter>div{grid-template-columns:1fr}.recipe-index-filter button{width:100%}.recipe-index-section{padding:38px 16px}.recipe-index-section>header{display:block}.recipe-index-section>header p{margin-top:9px}.recipe-index-groups{grid-template-columns:1fr;gap:28px}.recipe-index-alphabet{padding:10px 14px}.recipe-index-alphabet a{width:27px;height:27px}}
+@media print{.recipe-index-nav,.recipe-index-alphabet{display:none!important}.recipe-index-hero,.recipe-index-section{max-width:none;padding:18pt 0}.recipe-index-groups{grid-template-columns:repeat(3,1fr);gap:16pt}.recipe-index-group{break-inside:avoid}.recipe-index-section{break-before:page}}

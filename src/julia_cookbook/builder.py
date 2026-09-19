@@ -88,7 +88,7 @@ def _shell(title: str, content: str, site: dict[str, Any], page: str, data: dict
     payload = json.dumps(data or {}, separators=(",", ":"), ensure_ascii=True).replace("</", "<\\/")
     nested = page != "index"
     prefix = "../" if nested else ""
-    recipes_current = ' aria-current="page"' if page in {"index", "recipe"} else ""
+    recipes_current = ' aria-current="page"' if page in {"index", "recipe", "recipe-index"} else ""
     guides_current = ' aria-current="page"' if page in {"guides", "guide"} else ""
     feasts_current = ' aria-current="page"' if page == "feasts" else ""
     default_theme = str(site.get("theme", "auto")).lower()
@@ -691,16 +691,100 @@ def _index_page(
         ingredient_count = sum(len(step.ingredients) for step in recipe.steps)
         headnote = str(recipe.metadata.get("headnote") or recipe.metadata.get("description") or recipe.metadata.get("yield", "Flexible yield"))
         search_text = " ".join((recipe.title, headnote, tags, family, ingredients))
-        cards.append(f'''<article class="recipe-card" data-search="{escape(_search_key(search_text))}" data-tags="{escape(_search_key(tags + ' ' + family))}">
+        cards.append(f'''<article class="recipe-card" data-search="{escape(_search_key(search_text))}" data-tags="{escape(_search_key(tags))}">
           <label class="select-recipe"><input type="checkbox" data-meal-recipe="{recipe.id}" aria-label="Add {escape(recipe.title)} to shopping list"></label>
           <a href="recipes/{recipe.id}.html" data-recipe-link="{recipe.id}"><p class="eyebrow">{len(recipe.steps)} steps &middot; {ingredient_count} ingredients</p><h2>{escape(recipe.title)}</h2><p>{escape(headnote)}</p><div class="tag-list">{''.join(f'<span>{escape(str(tag))}</span>' for tag in recipe.metadata.get('tags', []))}</div></a>
         </article>''')
     recipe_count = len(recipes)
-    content = f'''<section class="recipe-search-home" data-search-first><div class="recipe-search-intro"><p class="eyebrow">Recipes</p><h1>{escape(str(site.get('title', 'My Cookbook')))}</h1><p>{escape(str(site.get('description', 'Recipes tested, adjusted, and kept.')))}</p></div><form class="home-search-form" data-search-form role="search"><label class="sr-only" for="recipe-search">Search recipes</label><div class="home-search-field"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m16.5 16.5 4 4"></path></svg><input id="recipe-search" type="search" data-search placeholder="Search recipes, ingredients, or tags" autocomplete="off" enterkeyhint="search" aria-controls="recipe-search-suggestions recipe-search-results" aria-autocomplete="list"><button type="submit">Search</button></div><div class="search-suggestions" id="recipe-search-suggestions" data-search-suggestions hidden><div class="search-suggestion-list" data-suggestion-list role="listbox"></div><p data-suggestion-summary></p></div></form><div class="home-search-actions"><button class="secondary" data-action="open-shopping">Shopping list <span data-selected-count>0</span></button></div><p class="search-prompt" data-search-prompt>{recipe_count} recipe{'s' if recipe_count != 1 else ''} ready to search.</p></section>
+    content = f'''<section class="recipe-search-home" data-search-first><div class="recipe-search-intro"><p class="eyebrow">Recipes</p><h1>{escape(str(site.get('title', 'My Cookbook')))}</h1><p>{escape(str(site.get('description', 'Recipes tested, adjusted, and kept.')))}</p></div><form class="home-search-form" data-search-form role="search"><label class="sr-only" for="recipe-search">Search recipes</label><div class="home-search-field"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m16.5 16.5 4 4"></path></svg><input id="recipe-search" type="search" data-search placeholder="Search recipes, ingredients, or #tags" autocomplete="off" enterkeyhint="search" aria-controls="recipe-search-suggestions recipe-search-results" aria-autocomplete="list"><button type="submit">Search</button></div><div class="search-suggestions" id="recipe-search-suggestions" data-search-suggestions hidden><div class="search-suggestion-list" data-suggestion-list role="listbox"></div><p data-suggestion-summary></p></div></form><div class="home-search-actions"><a href="recipes/index.html">All Recipes Index</a><button class="secondary" data-action="open-shopping">Shopping list <span data-selected-count>0</span></button></div><p class="search-prompt" data-search-prompt>{recipe_count} recipe{'s' if recipe_count != 1 else ''} ready to search.</p></section>
       <section class="recipe-search-results" id="recipe-search-results" data-search-results hidden><header class="search-results-head"><h2>Recipes</h2><p data-result-count aria-live="polite"></p></header><section class="recipe-grid" aria-label="Recipe search results">{''.join(cards)}</section><p class="empty-state" hidden data-empty>No recipes match your search.</p></section>
       <dialog id="shopping-dialog" class="shopping-dialog"><form method="dialog" class="dialog-head"><h2>Shopping list</h2><button class="icon-button" aria-label="Close">&times;</button></form><div class="shopping-tabs"><button class="active" data-shopping-view="merged">Merged</button><button data-shopping-view="component">By recipe</button></div><div data-shopping-list></div><div class="button-row"><button data-action="copy-shopping">Copy list</button><button class="secondary" data-action="clear-shopping">Clear</button></div></dialog>'''
     data = {"recipes": recipe_payloads, "sync": {"googleClientId": sync.get("google_client_id", "")}}
     return _shell(str(site.get("title", "My Cookbook")), content, site, "index", data)
+
+
+def _metadata_terms(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    text = str(value or "").strip()
+    return [text] if text else []
+
+
+def _index_anchor(prefix: str, value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", _search_key(value)).strip("-") or "other"
+    return f"{prefix}-{slug}"
+
+
+def _recipe_index_page(recipes: list[Recipe], site: dict[str, Any], sync: dict[str, Any]) -> str:
+    ordered = sorted(recipes, key=lambda recipe: _search_key(recipe.title))
+
+    def recipe_entry(recipe: Recipe) -> str:
+        metadata = recipe.metadata
+        ingredients = " ".join(
+            ingredient.name for step in default_steps(recipe) for ingredient in step.ingredients
+        )
+        search_text = " ".join((
+            recipe.title,
+            " ".join(_metadata_terms(metadata.get("family"))),
+            " ".join(_metadata_terms(metadata.get("tags"))),
+            " ".join(_metadata_terms(metadata.get("main_ingredient"))),
+            ingredients,
+        ))
+        tags = " ".join(_search_key(tag) for tag in _metadata_terms(metadata.get("tags")))
+        return (
+            f'<li data-recipe-index-item data-recipe-id="{escape(recipe.id)}" '
+            f'data-index-search="{escape(_search_key(search_text))}" data-index-tags="{escape(tags)}">'
+            f'<a href="{escape(recipe.id)}.html">{escape(recipe.title)}</a></li>'
+        )
+
+    def grouped_section(title: str, section_id: str, description: str, groups: dict[str, list[Recipe]]) -> str:
+        rendered_groups = []
+        for label in sorted(groups, key=lambda item: (item.startswith("No "), _search_key(item))):
+            members = sorted(groups[label], key=lambda recipe: _search_key(recipe.title))
+            links = "".join(recipe_entry(recipe) for recipe in members)
+            rendered_groups.append(
+                f'<section class="recipe-index-group" id="{_index_anchor(section_id, label)}">'
+                f'<h3>{escape(label)} <span>{len(members)}</span></h3><ul>{links}</ul></section>'
+            )
+        return f'''<section class="recipe-index-section" id="{section_id}"><header><h2>{escape(title)}</h2><p>{escape(description)}</p></header><div class="recipe-index-groups">{''.join(rendered_groups)}</div></section>'''
+
+    by_letter: dict[str, list[Recipe]] = {}
+    by_family: dict[str, list[Recipe]] = {}
+    by_tag: dict[str, list[Recipe]] = {}
+    by_ingredient: dict[str, list[Recipe]] = {}
+    for recipe in ordered:
+        normalized_title = _search_key(recipe.title).lstrip()
+        letter = normalized_title[:1].upper() if normalized_title[:1].isalpha() else "#"
+        by_letter.setdefault(letter, []).append(recipe)
+
+        families = _metadata_terms(recipe.metadata.get("family")) or ["No family"]
+        for family in families:
+            by_family.setdefault(family.replace("-", " ").title(), []).append(recipe)
+
+        tags = _metadata_terms(recipe.metadata.get("tags")) or ["No tags"]
+        for tag in tags:
+            by_tag.setdefault(tag.replace("-", " "), []).append(recipe)
+
+        main_ingredients = _metadata_terms(recipe.metadata.get("main_ingredient"))
+        if not main_ingredients:
+            main_ingredients = [
+                ingredient.name
+                for step in default_steps(recipe)
+                for ingredient in step.ingredients[:1]
+            ][:1]
+        for ingredient in main_ingredients or ["No main ingredient"]:
+            by_ingredient.setdefault(ingredient, []).append(recipe)
+
+    alphabet = "".join(
+        f'<a href="#{_index_anchor("by-name", letter)}">{escape(letter)}</a>' for letter in by_letter
+    )
+    content = f'''<header class="recipe-index-hero"><p class="eyebrow">All Recipes Index</p><h1>Find every recipe</h1><p>Browse the cookbook alphabetically or inspect its families, tags, and main ingredients.</p><nav class="recipe-index-nav" aria-label="Recipe index sections"><a href="#by-name">By name</a><a href="#by-family">By family</a><a href="#by-tag">By tag</a><a href="#by-main-ingredient">By main ingredient</a></nav><form class="recipe-index-filter" data-index-filter-form role="search"><label for="recipe-index-filter">Filter the index</label><div><input id="recipe-index-filter" type="search" data-index-filter placeholder="Filter by recipe, family, ingredient, or #tag" autocomplete="off"><button class="secondary" type="reset" data-index-filter-clear hidden>Clear</button></div><p data-index-filter-summary aria-live="polite">{len(recipes)} recipes</p></form></header>
+      <div class="recipe-index-alphabet" aria-label="Alphabetical recipe index">{alphabet}</div>
+      {grouped_section("By name", "by-name", f"All {len(recipes)} recipes, arranged like a traditional book index.", by_letter)}
+      {grouped_section("By family", "by-family", "Families collect alternate or closely related recipes. “No family” identifies recipes still awaiting classification.", by_family)}
+      {grouped_section("By tag", "by-tag", "Every descriptive tag in the cookbook, including overlapping categories.", by_tag)}
+      {grouped_section("By main ingredient", "by-main-ingredient", "Uses main_ingredient metadata when present, otherwise the first direct ingredient in the recipe.", by_ingredient)}'''
+    return _shell("All Recipes Index", content, site, "recipe-index", {"collection": "recipe-index", "sync": {"googleClientId": sync.get("google_client_id", "")}})
 
 
 def _guides_index_page(guides: list[Guide], site: dict[str, Any], sync: dict[str, Any]) -> str:
@@ -782,6 +866,7 @@ def build(root: str | Path = ".") -> tuple[Path, list[Recipe]]:
         (output / "guides" / f"{guide.id}.html").write_text(_guide_page(guide, site, sync), encoding="utf-8")
     feasts = build_feasts(root_path, output, recipes, str(site.get("theme", "auto")).lower())
     (output / "index.html").write_text(_index_page(recipes, recipe_payloads, site, sync), encoding="utf-8")
+    (output / "recipes" / "index.html").write_text(_recipe_index_page(recipes, site, sync), encoding="utf-8")
     (output / "guides" / "index.html").write_text(_guides_index_page(guides, site, sync), encoding="utf-8")
     (output / "feasts" / "index.html").write_text(_feasts_index_page(feasts, site, sync), encoding="utf-8")
     for asset in ("styles.css", "app.js", "icon.svg"):

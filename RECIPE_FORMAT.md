@@ -38,6 +38,7 @@ headnote: A French ham and cheese sandwich with Mornay sauce.
 source: America's Test Kitchen
 source_url: https://example.com/recipe
 family: sandwich
+main_ingredient: ham
 tags: [sandwich, ham, french]
 units: imperial
 variations: [vegetarian-croque]
@@ -57,6 +58,11 @@ Do something with a descriptive component name.
 
 The filename becomes the recipe slug: `croque_monsieur.md` becomes
 `croque-monsieur`.
+
+The generated **All Recipes Index** groups recipes by name, `family`, `tags`,
+and `main_ingredient`. `main_ingredient` may be a single value or a list. When
+it is omitted, Julia uses the first direct ingredient from the default recipe
+steps as a useful initial classification.
 
 ## Recipe variants and source includes
 

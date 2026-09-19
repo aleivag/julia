@@ -445,16 +445,18 @@
       suggestions.hidden = false;
     };
     const filter = ({ commit = committed, suggest = false } = {}) => {
-      const query = normalizeSearch(search.value.trim()), rawTag = params.get("tag"), tag = rawTag ? normalizeSearch(rawTag) : null;
-      const active = !searchFirst || !!query || !!tag, matches = [];
-      document.querySelectorAll(".recipe-card").forEach(card => { const visible = active && (!query || normalizeSearch(card.dataset.search).includes(query)) && (!tag || normalizeSearch(card.dataset.tags).split(" ").includes(tag)); card.hidden = !visible; if (visible) matches.push(card); });
+      const rawQuery = normalizeSearch(search.value.trim()), terms = rawQuery.split(/\s+/).filter(Boolean);
+      const exactTags = terms.filter(term => term.startsWith("#") && term.length > 1).map(term => term.slice(1));
+      const query = terms.filter(term => !(term.startsWith("#") && term.length > 1)).join(" "), rawTag = params.get("tag"), tag = rawTag ? normalizeSearch(rawTag) : null;
+      const active = !searchFirst || !!rawQuery || !!tag, matches = [];
+      document.querySelectorAll(".recipe-card").forEach(card => { const cardTags = normalizeSearch(card.dataset.tags).split(" ").filter(Boolean); const visible = active && (!query || normalizeSearch(card.dataset.search).includes(query)) && exactTags.every(exactTag => cardTags.includes(exactTag)) && (!tag || cardTags.includes(tag)); card.hidden = !visible; if (visible) matches.push(card); });
       const shown = matches.length, showCollection = !searchFirst || (commit && active);
       const empty = document.querySelector("[data-empty]"); if (empty) empty.hidden = !active || !!shown;
       if (results) results.hidden = !showCollection;
-      if (prompt) prompt.hidden = !!query || !!tag;
+      if (prompt) prompt.hidden = !!rawQuery || !!tag;
       if (resultCount) resultCount.textContent = showCollection ? `${shown} recipe${shown === 1 ? "" : "s"}` : "";
       document.body.classList.toggle("has-search-results", searchFirst && showCollection);
-      if (suggest && !showCollection) renderSuggestions(matches, query); else if (suggestions) suggestions.hidden = true;
+      if (suggest && !showCollection) renderSuggestions(matches, rawQuery); else if (suggestions) suggestions.hidden = true;
     };
     search.addEventListener("input", () => { if (!search.value.trim()) committed = false; filter({ commit: committed, suggest: !committed }); });
     search.addEventListener("keydown", event => { if (event.key === "ArrowDown" && !suggestions?.hidden) { event.preventDefault(); suggestionList?.querySelector("a")?.focus(); } if (event.key === "Escape" && suggestions) suggestions.hidden = true; });
@@ -493,6 +495,36 @@
     document.querySelector('[data-action="clear-shopping"]').addEventListener("click", event => { event.preventDefault(); selected.clear(); document.querySelectorAll("[data-meal-recipe]").forEach(input => input.checked = false); updateCount(); renderShopping(); });
     document.querySelector('[data-action="copy-shopping"]').addEventListener("click", async event => { event.preventDefault(); const text = [...document.querySelectorAll("[data-shopping-list] h3,[data-shopping-list] li")].map(el => el.tagName === "H3" ? `\n${el.textContent}` : `- ${el.textContent.trim()}`).join("\n"); await navigator.clipboard.writeText(text); toast("Shopping list copied"); });
   }
+
+  function setupRecipeIndex() {
+    const input = document.querySelector("[data-index-filter]");
+    if (!input) return;
+    const form = document.querySelector("[data-index-filter-form]"), clear = document.querySelector("[data-index-filter-clear]");
+    const summary = document.querySelector("[data-index-filter-summary]"), alphabet = document.querySelector(".recipe-index-alphabet");
+    const items = [...document.querySelectorAll("[data-recipe-index-item]")];
+    const normalize = value => String(value).normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    const total = new Set(items.map(item => item.dataset.recipeId)).size;
+    const filter = () => {
+      const rawQuery = normalize(input.value.trim()), terms = rawQuery.split(/\s+/).filter(Boolean);
+      const exactTags = terms.filter(term => term.startsWith("#") && term.length > 1).map(term => term.slice(1));
+      const query = terms.filter(term => !(term.startsWith("#") && term.length > 1)).join(" "), visibleRecipes = new Set();
+      items.forEach(item => {
+        const itemTags = item.dataset.indexTags.split(" ").filter(Boolean);
+        const visible = (!query || item.dataset.indexSearch.includes(query)) && exactTags.every(tag => itemTags.includes(tag));
+        item.hidden = !visible;
+        if (visible) visibleRecipes.add(item.dataset.recipeId);
+      });
+      document.querySelectorAll(".recipe-index-group").forEach(group => { group.hidden = !group.querySelector("[data-recipe-index-item]:not([hidden])"); });
+      document.querySelectorAll(".recipe-index-section").forEach(section => { section.hidden = !section.querySelector(".recipe-index-group:not([hidden])"); });
+      if (alphabet) alphabet.hidden = !!rawQuery;
+      if (clear) clear.hidden = !rawQuery;
+      if (summary) summary.textContent = `${visibleRecipes.size} of ${total} recipe${visibleRecipes.size === 1 ? "" : "s"}`;
+    };
+    input.addEventListener("input", filter);
+    form?.addEventListener("submit", event => event.preventDefault());
+    form?.addEventListener("reset", () => setTimeout(() => { filter(); input.focus(); }));
+    filter();
+  }
   const escapeHtml = value => String(value).replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[char]);
 
   async function setupDrive() {
@@ -524,10 +556,10 @@
     async function create() { const boundary = `julia_${Date.now()}`, metadata = JSON.stringify({ name: "julia-cookbook-v1.json", parents: ["appDataFolder"] }); const body = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(store)}\r\n--${boundary}--`; await api("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", { method:"POST", headers:{"Content-Type":`multipart/related; boundary=${boundary}`}, body }); }
     async function upload(id) { await api(`https://www.googleapis.com/upload/drive/v3/files/${id}?uploadType=media`, { method:"PATCH", headers:{"Content-Type":"application/json"}, body:JSON.stringify(store) }); }
   }
-  setupTheme(); setupRecipe(); setupGuide(); setupFeastShopping(); setupIndex(); setupDrive().catch(() => {});
+  setupTheme(); setupRecipe(); setupGuide(); setupFeastShopping(); setupIndex(); setupRecipeIndex(); setupDrive().catch(() => {});
   if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
     const page = document.documentElement.dataset.page;
-    const prefix = page === "feast-shopping" ? "../../" : ["recipe","guide"].includes(page) ? "../" : "";
+    const prefix = page === "feast-shopping" ? "../../" : ["recipe","recipe-index","guide","guides","feasts"].includes(page) ? "../" : "";
     navigator.serviceWorker.register(`${prefix}sw.js`).catch(() => {});
   }
 })();

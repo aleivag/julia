@@ -36,12 +36,16 @@ The generated collection is divided by content type:
 
 ```text
 /               Recipes (default)
+/recipes/       All-recipes index and individual recipes
 /guides/        Reference guides
 /feasts/        Gatherings and menus
 ```
 
 Each section has its own search and presentation. Shopping-list controls remain
 on the Recipes page only.
+
+Recipe searches are case- and accent-insensitive. Prefix a term with `#` to
+require an exact tag, such as `chicken #sous-vide` or simply `#dessert`.
 
 Cookbook identity is separate from the Julia framework:
 
