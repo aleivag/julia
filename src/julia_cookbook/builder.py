@@ -682,17 +682,22 @@ def _index_page(
     sync: dict[str, Any],
 ) -> str:
     cards = []
+    payload_by_id = {str(payload.get("id", "")): payload for payload in recipe_payloads}
     for recipe in recipes:
         tags = " ".join(str(tag) for tag in recipe.metadata.get("tags", []))
         family = str(recipe.metadata.get("family", ""))
+        shopping_ingredients = payload_by_id.get(recipe.id, {}).get("shoppingIngredients", [])
+        ingredients = " ".join(str(ingredient.get("name", "")) for ingredient in shopping_ingredients)
         ingredient_count = sum(len(step.ingredients) for step in recipe.steps)
         headnote = str(recipe.metadata.get("headnote") or recipe.metadata.get("description") or recipe.metadata.get("yield", "Flexible yield"))
-        cards.append(f'''<article class="recipe-card" data-search="{escape(_search_key(recipe.title + ' ' + tags + ' ' + family))}" data-tags="{escape(_search_key(tags + ' ' + family))}">
+        search_text = " ".join((recipe.title, headnote, tags, family, ingredients))
+        cards.append(f'''<article class="recipe-card" data-search="{escape(_search_key(search_text))}" data-tags="{escape(_search_key(tags + ' ' + family))}">
           <label class="select-recipe"><input type="checkbox" data-meal-recipe="{recipe.id}" aria-label="Add {escape(recipe.title)} to shopping list"></label>
           <a href="recipes/{recipe.id}.html" data-recipe-link="{recipe.id}"><p class="eyebrow">{len(recipe.steps)} steps &middot; {ingredient_count} ingredients</p><h2>{escape(recipe.title)}</h2><p>{escape(headnote)}</p><div class="tag-list">{''.join(f'<span>{escape(str(tag))}</span>' for tag in recipe.metadata.get('tags', []))}</div></a>
         </article>''')
-    content = f'''<section class="library-head"><div><p class="eyebrow">Recipes</p><h1>{escape(str(site.get('title', 'My Cookbook')))}</h1><p>{escape(str(site.get('description', 'Recipes tested, adjusted, and kept.')))}</p></div><div class="library-tools"><label class="search"><span class="sr-only">Search recipes</span><input type="search" data-search placeholder="Search recipes"></label><button data-action="open-shopping">Shopping list <span data-selected-count>0</span></button></div></section>
-      <section class="recipe-grid" aria-label="Recipes">{''.join(cards)}</section><p class="empty-state" hidden data-empty>No recipes match your search.</p>
+    recipe_count = len(recipes)
+    content = f'''<section class="recipe-search-home" data-search-first><div class="recipe-search-intro"><p class="eyebrow">Recipes</p><h1>{escape(str(site.get('title', 'My Cookbook')))}</h1><p>{escape(str(site.get('description', 'Recipes tested, adjusted, and kept.')))}</p></div><form class="home-search-form" data-search-form role="search"><label class="sr-only" for="recipe-search">Search recipes</label><div class="home-search-field"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m16.5 16.5 4 4"></path></svg><input id="recipe-search" type="search" data-search placeholder="Search recipes, ingredients, or tags" autocomplete="off" enterkeyhint="search" aria-controls="recipe-search-suggestions recipe-search-results" aria-autocomplete="list"><button type="submit">Search</button></div><div class="search-suggestions" id="recipe-search-suggestions" data-search-suggestions hidden><div class="search-suggestion-list" data-suggestion-list role="listbox"></div><p data-suggestion-summary></p></div></form><div class="home-search-actions"><button class="secondary" data-action="open-shopping">Shopping list <span data-selected-count>0</span></button></div><p class="search-prompt" data-search-prompt>{recipe_count} recipe{'s' if recipe_count != 1 else ''} ready to search.</p></section>
+      <section class="recipe-search-results" id="recipe-search-results" data-search-results hidden><header class="search-results-head"><h2>Recipes</h2><p data-result-count aria-live="polite"></p></header><section class="recipe-grid" aria-label="Recipe search results">{''.join(cards)}</section><p class="empty-state" hidden data-empty>No recipes match your search.</p></section>
       <dialog id="shopping-dialog" class="shopping-dialog"><form method="dialog" class="dialog-head"><h2>Shopping list</h2><button class="icon-button" aria-label="Close">&times;</button></form><div class="shopping-tabs"><button class="active" data-shopping-view="merged">Merged</button><button data-shopping-view="component">By recipe</button></div><div data-shopping-list></div><div class="button-row"><button data-action="copy-shopping">Copy list</button><button class="secondary" data-action="clear-shopping">Clear</button></div></dialog>'''
     data = {"recipes": recipe_payloads, "sync": {"googleClientId": sync.get("google_client_id", "")}}
     return _shell(str(site.get("title", "My Cookbook")), content, site, "index", data)

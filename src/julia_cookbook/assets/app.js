@@ -426,9 +426,42 @@
     const normalizeSearch = value => String(value).normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
     const search = document.querySelector("[data-search]");
     if (!search) return;
-    search.value = new URLSearchParams(location.search).get("q") || "";
-    const filter = () => { const query = normalizeSearch(search.value), rawTag = new URLSearchParams(location.search).get("tag"), tag = rawTag ? normalizeSearch(rawTag) : null; let shown = 0; document.querySelectorAll(".recipe-card").forEach(card => { const visible = (!query || normalizeSearch(card.dataset.search).includes(query)) && (!tag || normalizeSearch(card.dataset.tags).split(" ").includes(tag)); card.hidden = !visible; shown += visible; }); document.querySelector("[data-empty]").hidden = !!shown; };
-    search.addEventListener("input", filter); filter();
+    const params = new URLSearchParams(location.search), searchFirst = !!document.querySelector("[data-search-first]");
+    const results = document.querySelector("[data-search-results]"), prompt = document.querySelector("[data-search-prompt]"), resultCount = document.querySelector("[data-result-count]");
+    const suggestions = document.querySelector("[data-search-suggestions]"), suggestionList = document.querySelector("[data-suggestion-list]"), suggestionSummary = document.querySelector("[data-suggestion-summary]");
+    let committed = !!params.get("q") || !!params.get("tag");
+    search.value = params.get("q") || "";
+    const renderSuggestions = (matches, query) => {
+      if (!suggestions || !suggestionList || !suggestionSummary || !query) { if (suggestions) suggestions.hidden = true; return; }
+      suggestionList.replaceChildren();
+      matches.slice(0, 6).forEach(card => {
+        const source = card.querySelector("a[data-recipe-link]"), option = document.createElement("a"), title = document.createElement("strong"), detail = document.createElement("span");
+        option.href = source.href; option.setAttribute("role", "option");
+        title.textContent = card.querySelector("h2")?.textContent || "Recipe";
+        detail.textContent = card.querySelector(".eyebrow")?.textContent || "";
+        option.append(title, detail); suggestionList.append(option);
+      });
+      suggestionSummary.textContent = matches.length ? `${matches.length} match${matches.length === 1 ? "" : "es"} · Press Enter to see all results` : "No matching recipes";
+      suggestions.hidden = false;
+    };
+    const filter = ({ commit = committed, suggest = false } = {}) => {
+      const query = normalizeSearch(search.value.trim()), rawTag = params.get("tag"), tag = rawTag ? normalizeSearch(rawTag) : null;
+      const active = !searchFirst || !!query || !!tag, matches = [];
+      document.querySelectorAll(".recipe-card").forEach(card => { const visible = active && (!query || normalizeSearch(card.dataset.search).includes(query)) && (!tag || normalizeSearch(card.dataset.tags).split(" ").includes(tag)); card.hidden = !visible; if (visible) matches.push(card); });
+      const shown = matches.length, showCollection = !searchFirst || (commit && active);
+      const empty = document.querySelector("[data-empty]"); if (empty) empty.hidden = !active || !!shown;
+      if (results) results.hidden = !showCollection;
+      if (prompt) prompt.hidden = !!query || !!tag;
+      if (resultCount) resultCount.textContent = showCollection ? `${shown} recipe${shown === 1 ? "" : "s"}` : "";
+      document.body.classList.toggle("has-search-results", searchFirst && showCollection);
+      if (suggest && !showCollection) renderSuggestions(matches, query); else if (suggestions) suggestions.hidden = true;
+    };
+    search.addEventListener("input", () => { if (!search.value.trim()) committed = false; filter({ commit: committed, suggest: !committed }); });
+    search.addEventListener("keydown", event => { if (event.key === "ArrowDown" && !suggestions?.hidden) { event.preventDefault(); suggestionList?.querySelector("a")?.focus(); } if (event.key === "Escape" && suggestions) suggestions.hidden = true; });
+    suggestionList?.addEventListener("keydown", event => { const options = [...suggestionList.querySelectorAll("a")], current = options.indexOf(document.activeElement); if (event.key === "ArrowDown") { event.preventDefault(); (options[current + 1] || options[0])?.focus(); } if (event.key === "ArrowUp") { event.preventDefault(); if (current <= 0) search.focus(); else options[current - 1]?.focus(); } });
+    document.addEventListener("pointerdown", event => { if (suggestions && !event.target.closest("[data-search-form]")) suggestions.hidden = true; });
+    filter({ commit: committed });
+    document.querySelector("[data-search-form]")?.addEventListener("submit", event => { event.preventDefault(); if (!search.value.trim()) return search.focus(); committed = true; params.set("q", search.value.trim()); params.delete("tag"); const url = new URL(location.href); url.search = params.toString(); history.replaceState(null, "", url); filter({ commit: true }); });
     const shoppingButton = document.querySelector('[data-action="open-shopping"]');
     if (!payload.recipes || !shoppingButton) return;
     payload.recipes.forEach(recipe => {
